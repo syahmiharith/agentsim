@@ -689,6 +689,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const config = ${JSON.stringify(config, null, 2)};
 const dataPath = join(__dirname, "data", config.entitySlug + ".json");
 const statuses = new Set(config.statuses);
+const port = Number(process.env.PORT ?? "4178");
 
 async function readRecords() {
   try {
@@ -744,7 +745,7 @@ function normalizeRecord(body) {
 
 const server = createServer(async (request, response) => {
   try {
-    const url = new URL(request.url ?? "/", "http://127.0.0.1:4178");
+    const url = new URL(request.url ?? "/", "http://127.0.0.1:" + port);
 
     if (request.method === "OPTIONS") {
       send(response, 204, {});
@@ -811,8 +812,8 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(4178, "127.0.0.1", () => {
-  console.log(config.appName ? config.appName + " API running at http://127.0.0.1:4178" : "Agentsim generated API running at http://127.0.0.1:4178");
+server.listen(port, "127.0.0.1", () => {
+  console.log(config.appName ? config.appName + " API running at http://127.0.0.1:" + port : "Agentsim generated API running at http://127.0.0.1:" + port);
 });
 `;
 }

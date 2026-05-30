@@ -17,6 +17,8 @@
     "eval": "tsx src/evals/run-evals.ts --suite all --mode mock",
     "eval:mock": "tsx src/evals/run-evals.ts --suite smoke --mode mock",
     "eval:domain": "tsx src/evals/run-evals.ts --suite domain --mode mock",
+    "eval:runtime": "tsx src/evals/run-evals.ts --suite smoke --mode mock --runtime-api",
+    "eval:compare": "tsx src/evals/compare-reports.ts",
     "eval:throughput": "tsx src/evals/run-throughput.ts --suite smoke --mode mock --concurrency 4 --repeat 3"
   },
   "devDependencies": {

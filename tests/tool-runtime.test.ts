@@ -42,6 +42,67 @@ describe("tool runtime", () => {
     expect((await context.artifactsRepo.listArtifactsByRun()).map((artifact) => artifact.id)).toContain(result.id);
   });
 
+  it("blocks tool calls denied by context policy and emits an event", async () => {
+    const context = await createRuntimeContext("tool-policy-denied");
+    context.contextPolicy = {
+      requiredKinds: ["user_goal"],
+      allowedArtifactTypes: [],
+      maxCharsPerItem: 1000,
+      maxTotalChars: 1000,
+      includeDomainSpec: false,
+      includeMessages: false,
+      includeDecisions: false,
+      includeApprovals: false,
+      allowedTools: []
+    };
+    const tools = createToolRuntime(context);
+
+    await expect(tools.writeFile({ path: "blocked.md", content: "nope" })).rejects.toThrow("not allowed");
+
+    const events = await readFile(context.eventsPath, "utf8");
+    expect(events).toContain("tool.blocked_by_policy");
+    expect(events).toContain("write_file");
+  });
+
+  it("allows tool calls named in context policy", async () => {
+    const context = await createRuntimeContext("tool-policy-allowed");
+    context.contextPolicy = {
+      requiredKinds: ["user_goal"],
+      allowedArtifactTypes: [],
+      maxCharsPerItem: 1000,
+      maxTotalChars: 1000,
+      includeDomainSpec: false,
+      includeMessages: false,
+      includeDecisions: false,
+      includeApprovals: false,
+      allowedTools: ["write_file"]
+    };
+    const tools = createToolRuntime(context);
+
+    await tools.writeFile({ path: "allowed.md", content: "yes" });
+
+    expect(await context.workspaceDriver.readFile(context.workspace, "allowed.md")).toBe("yes");
+  });
+
+  it("requires run_command to be allowed by policy before approval is requested", async () => {
+    const context = await createRuntimeContext("tool-command-policy-denied", true);
+    context.contextPolicy = {
+      requiredKinds: ["user_goal"],
+      allowedArtifactTypes: [],
+      maxCharsPerItem: 1000,
+      maxTotalChars: 1000,
+      includeDomainSpec: false,
+      includeMessages: false,
+      includeDecisions: false,
+      includeApprovals: false,
+      allowedTools: []
+    };
+    const tools = createToolRuntime(context);
+
+    await expect(tools.runCommand({ command: "node", args: ["--version"] })).rejects.toThrow("not allowed");
+    expect(await context.approvalsRepo.listApprovalsByRun()).toEqual([]);
+  });
+
   it("rejects disabled commands before creating approvals", async () => {
     const context = await createRuntimeContext("tool-approval");
     const tools = createToolRuntime(context);
@@ -81,7 +142,13 @@ describe("tool runtime", () => {
   });
 });
 
-async function createRuntimeContext(runId: string, allowCommands = false) {
+async function createRuntimeContext(runId: string, allowCommands = false): Promise<ToolContext & {
+  eventsPath: string;
+  artifactStore: FileArtifactStore;
+  artifactsRepo: LocalArtifactsRepo;
+  approvalsRepo: LocalApprovalsRepo;
+  workspaceDriver: LocalFilesystemWorkspaceDriver;
+}> {
   const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-tool-runtime-"));
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(runId, outputRoot);
@@ -99,6 +166,7 @@ async function createRuntimeContext(runId: string, allowCommands = false) {
     artifactStore,
     artifactsRepo,
     approvalsRepo,
+    contextPolicy: undefined,
     modelMode: "mock" as const,
     allowCommands,
     hasApproval: async (action: string) => (await approvalsRepo.listApprovalsByRun()).some((approval) => approval.action === action && approval.status === "approved"),

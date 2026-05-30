@@ -174,6 +174,17 @@ describe("scheduler-driven orchestrator", () => {
     let shouldPause = true;
     const gatedStep: AgentStep = {
       ...testStep("client-proposal", "proposal", [], "client/proposal.md"),
+      contextPolicy: {
+        requiredKinds: ["user_goal", "task", "domain_spec"],
+        allowedArtifactTypes: [],
+        maxCharsPerItem: 1800,
+        maxTotalChars: 12000,
+        includeDomainSpec: true,
+        includeMessages: true,
+        includeDecisions: true,
+        includeApprovals: true,
+        allowedTools: ["ask_human"]
+      },
       async execute(context) {
         if (shouldPause) {
           await context.tools?.askHuman({ action: "approve proposal", requestedBy: "client-intake" });
@@ -317,23 +328,55 @@ describe("scheduler-driven orchestrator", () => {
     })).rejects.toThrow("Path escapes workspace");
   });
 
-  it("emits repair-loop events for recoverable validation failures", async () => {
+  it("repairs a recoverable missing trace file and completes the run", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-repair-"));
+    let validationCalls = 0;
 
-    await expect(runOrchestrator({
+    const result = await runOrchestrator({
       goal: "Build a repairable package",
       outputRoot,
       runId: "repair-run",
       modelProvider: new MockModelProvider(),
       agentSteps: [testStep("review-qa-report", "qa-report", [], "review/qa-report.md")],
-      validateFinalPackage: async () => ({ ok: false, failures: ["Missing required final-package file: client/user-guide.md"] }),
+      validateFinalPackage: async () => {
+        validationCalls += 1;
+        const contextEvalPath = join(outputRoot, "repair-run", "final-package", "trace", "context-eval.json");
+        if (validationCalls === 1) {
+          await unlink(contextEvalPath);
+          return { ok: false, failures: ["Missing required trace file: trace/context-eval.json"] };
+        }
+        await readFile(contextEvalPath, "utf8");
+        return okValidation();
+      },
       enableRepairLoop: true
-    })).rejects.toThrow("Repair loop created a fix task");
+    });
 
     const tasks = JSON.parse(await readFile(join(outputRoot, "repair-run", "state", "tasks.json"), "utf8"));
     const events = await readFile(join(outputRoot, "repair-run", "state", "events.jsonl"), "utf8");
+    expect(result.taskRun.status).toBe("COMPLETED");
+    expect(validationCalls).toBe(2);
     expect(tasks.some((task: { kind: string }) => task.kind === "fix")).toBe(true);
+    expect(tasks.find((task: { kind: string; status: string }) => task.kind === "fix")?.status).toBe("completed");
     expect(events).toContain("review.fix_task_created");
+    expect(events).toContain("repair.started");
+    expect(events).toContain("repair.applied");
+  });
+
+  it("does not repair unrecoverable validation failures", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-unrepairable-"));
+
+    await expect(runOrchestrator({
+      goal: "Build an unrepairable package",
+      outputRoot,
+      runId: "unrepairable-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("review-qa-report", "qa-report", [], "review/qa-report.md")],
+      validateFinalPackage: async () => ({ ok: false, failures: ["Invalid package contract"] }),
+      enableRepairLoop: true
+    })).rejects.toThrow("Final package validation failed: Invalid package contract");
+
+    const tasks = JSON.parse(await readFile(join(outputRoot, "unrepairable-run", "state", "tasks.json"), "utf8"));
+    expect(tasks.some((task: { kind: string }) => task.kind === "fix")).toBe(false);
   });
 });
 

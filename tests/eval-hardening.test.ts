@@ -1,10 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
 import { renderGeneratedAppFiles } from "../src/templates/app.js";
-import { assertCommandPasses, assertGeneratedApiBehavior } from "../src/evals/assertions.js";
+import { assertCommandPasses, assertGeneratedApiBehavior, assertGeneratedApiRuntimeBehavior } from "../src/evals/assertions.js";
+import { renderEvalReportComparison } from "../src/evals/compare-reports.js";
 import { compareEvalReports } from "../src/evals/report-compare.js";
 import { runEvalBatch, type EvalReport } from "../src/evals/run-evals.js";
 import type { EvalCaseResult } from "../src/evals/scoring.js";
@@ -36,6 +37,23 @@ describe("eval hardening assertions", () => {
     const root = await createGeneratedAppRoot(spec.sourceGoal);
 
     expect(await assertGeneratedApiBehavior(root, spec.primaryEntity.slug, spec.workflowStatuses)).toEqual([]);
+  });
+
+  it("checks generated API behavior at runtime", async () => {
+    const spec = inferDomainSpec("Build an inventory request system for a flower company");
+    const root = await createGeneratedAppRoot(spec.sourceGoal);
+
+    expect(await assertGeneratedApiRuntimeBehavior(root, spec.primaryEntity.slug, spec.workflowStatuses, spec.primaryEntity.fields)).toEqual([]);
+  });
+
+  it("reports runtime API failures cleanly", async () => {
+    const spec = inferDomainSpec("Build a booking system for a barber shop");
+    const root = await createGeneratedAppRoot(spec.sourceGoal);
+    await rm(join(root, "app", "server.js"));
+
+    expect(await assertGeneratedApiRuntimeBehavior(root, spec.primaryEntity.slug, spec.workflowStatuses, spec.primaryEntity.fields)).toEqual([
+      expect.objectContaining({ code: "api_runtime_server_missing" })
+    ]);
   });
 
   it("reports missing API behavior and invalid seed data", async () => {
@@ -107,6 +125,7 @@ describe("eval report comparison", () => {
       hardGateRegressions: [{ caseId: "a", baseRunId: "run-a", headRunId: "run-a" }],
       qualityRegressions: [{ caseId: "a", baseQualityScore: 1, headQualityScore: 0.7, delta: -0.3 }]
     });
+    expect(renderEvalReportComparison(compareEvalReports(base, head, { qualityRegressionThreshold: 0.05 }))).toContain("Hard Gate Regressions");
   });
 });
 

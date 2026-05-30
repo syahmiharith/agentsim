@@ -16,6 +16,7 @@ export interface EvalRunnerOptions {
   repeat: number;
   concurrency: number;
   adapter: EvalAdapter;
+  runtimeApi?: boolean;
 }
 
 export interface EvalReport {
@@ -50,7 +51,7 @@ export async function runEvalBatch(options: EvalRunnerOptions): Promise<EvalRepo
         runId,
         modelProvider: createModelProvider(options.mode)
       });
-      return await scoreEvalRun(evalCase, runId, result, { durationMs: Date.now() - runStartedAt });
+      return await scoreEvalRun(evalCase, runId, result, { durationMs: Date.now() - runStartedAt, runtimeApi: options.runtimeApi });
     } catch (error) {
       return createRuntimeFailure(evalCase, runId, join(outputRoot, runId, "final-package"), Date.now() - runStartedAt, error);
     }
@@ -76,7 +77,8 @@ function parseArgs(argv: string[]): EvalRunnerOptions {
     output: "outputs/evals",
     repeat: 1,
     concurrency: 1,
-    adapter: "agentsim"
+    adapter: "agentsim",
+    runtimeApi: false
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -106,6 +108,9 @@ function parseArgs(argv: string[]): EvalRunnerOptions {
         options.adapter = readChoice(next, ["agentsim"], "--adapter") as EvalAdapter;
         index += 1;
         break;
+      case "--runtime-api":
+        options.runtimeApi = true;
+        break;
       default:
         throw new Error(`Unknown eval option: ${arg}`);
     }
@@ -132,6 +137,7 @@ function renderMarkdownReport(report: EvalReport): string {
     `Suite: ${report.options.suite}`,
     `Mode: ${report.options.mode}`,
     `Adapter: ${report.options.adapter}`,
+    `Runtime API checks: ${report.options.runtimeApi ? "enabled" : "disabled"}`,
     "",
     "## Summary",
     "",

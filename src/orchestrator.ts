@@ -19,6 +19,7 @@ import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
 import type { DomainInferenceResult } from "./domain/domain-inference.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
 import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
+import { renderGeneratedAppFiles } from "./templates/app.js";
 import type {
   AgentActionRecord,
   AgentContext,
@@ -338,12 +339,12 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
 async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Promise<RunDemoResult> {
   await exportFinalPackageArtifacts(runtime);
   await writeTraceFiles(runtime);
-  const validationResult = await runtime.validateFinalPackage({
+  let validationResult = await runtime.validateFinalPackage({
     finalPackageDir: runtime.workspace.finalPackageDir,
     artifacts: runtime.artifactStore.list(),
     domainPack: runtime.domainPack
   });
-  const reviewResult = reviewResultFromValidation(validationResult);
+  let reviewResult = reviewResultFromValidation(validationResult);
 
   if (reviewResult.verdict === "revise" && runtime.enableRepairLoop) {
     const reviewTask = (await runtime.tasksRepo.listTasksByRun()).find((task) => task.kind === "review") ?? (await runtime.tasksRepo.listTasksByRun()).at(-1);
@@ -362,9 +363,14 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
         message: "Created a bounded fix task from validation review.",
         data: { requiredFixes: reviewResult.requiredFixes }
       });
+      await executeFixTask(runtime, fixTask, validationResult.failures);
+      validationResult = await runtime.validateFinalPackage({
+        finalPackageDir: runtime.workspace.finalPackageDir,
+        artifacts: runtime.artifactStore.list(),
+        domainPack: runtime.domainPack
+      });
+      reviewResult = reviewResultFromValidation(validationResult);
     }
-    await failRun(runtime, "REPAIR_NOT_IMPLEMENTED", "Repair loop created a fix task, but fix task execution is not implemented yet.", { reviewResult });
-    throw new Error("Repair loop created a fix task, but fix task execution is not implemented yet.");
   }
 
   if (!validationResult.ok) {
@@ -424,6 +430,97 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
     decisions: runtime.decisions,
     domainSpec: runtime.domainSpec
   };
+}
+
+async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures: string[]): Promise<void> {
+  await runtime.tasksRepo.updateTaskStatus(task.id, "ready");
+  await runtime.tasksRepo.incrementTaskAttempt(task.id);
+  await runtime.tasksRepo.updateTaskStatus(task.id, "running");
+  await runtime.eventStore.append({
+    level: "info",
+    name: "repair.started",
+    taskId: task.id,
+    agentId: "builder",
+    message: "Started deterministic repair task.",
+    data: { failures }
+  });
+
+  const applied: string[] = [];
+  try {
+    if (failures.some((failure) => failure.includes("trace/domain-spec.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
+      applied.push("trace/domain-spec.json");
+    }
+
+    if (failures.some((failure) => failure.includes("trace/domain-inference.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
+      applied.push("trace/domain-inference.json");
+    }
+
+    if (failures.some((failure) => failure.includes("trace/context-eval.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-eval.json"), JSON.stringify({
+        evaluation: evaluateContextPackages({
+          runId: runtime.runId,
+          packages: runtime.contextPackages,
+          actions: runtime.agentActions,
+          artifacts: runtime.artifactStore.list()
+        })
+      }, null, 2), "utf8");
+      applied.push("trace/context-eval.json");
+    }
+
+    if (failures.some((failure) => failure.includes("trace/artifact-lineage.json") || failure.includes("lineage"))) {
+      await runtime.artifactStore.exportLineage(safeJoin(runtime.workspace.finalPackageDir, "trace/artifact-lineage.json"));
+      applied.push("trace/artifact-lineage.json");
+    }
+
+    if (failures.some((failure) => failure.includes("app/"))) {
+      for (const [relativePath, content] of Object.entries(renderGeneratedAppFiles(runtime.workspace, runtime.domainSpec))) {
+        await writeFile(safeJoin(runtime.workspace.finalPackageDir, relativePath), content, "utf8");
+        await runtime.workspaceDriver.writeFile(runtime.workspace, relativePath, content);
+      }
+      applied.push("app/");
+    }
+
+    for (const artifact of runtime.artifactStore.list()) {
+      if (artifact.finalPackagePath === "app/") {
+        continue;
+      }
+      if (!failures.some((failure) => failure.includes(artifact.finalPackagePath))) {
+        continue;
+      }
+      const content = await readFile(artifact.workspacePath, "utf8");
+      const finalPath = safeJoin(runtime.workspace.finalPackageDir, artifact.finalPackagePath);
+      await mkdir(dirname(finalPath), { recursive: true });
+      await writeFile(finalPath, content, "utf8");
+      applied.push(artifact.finalPackagePath);
+    }
+
+    if (applied.length === 0) {
+      throw new Error("No deterministic repair action matched validation failures.");
+    }
+
+    await runtime.tasksRepo.updateTaskStatus(task.id, "completed");
+    await runtime.eventStore.append({
+      level: "info",
+      name: "repair.applied",
+      taskId: task.id,
+      agentId: "builder",
+      message: "Applied deterministic repair actions.",
+      data: { applied }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown repair failure.";
+    await runtime.tasksRepo.updateTaskStatus(task.id, "failed", message);
+    await runtime.eventStore.append({
+      level: "error",
+      name: "repair.failed",
+      taskId: task.id,
+      agentId: "builder",
+      message,
+      data: { failures }
+    });
+  }
 }
 
 export async function executeTask(runtime: OrchestratorRuntime, taskId: string): Promise<TaskExecutionResult> {
@@ -528,6 +625,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       runId: runtime.runId,
       workspace: runtime.workspace,
       workspaceDriver: runtime.workspaceDriver,
+      contextPackage,
+      contextPolicy: contextPackage.policy,
       eventStore: runtime.eventStore,
       artifactStore: runtime.artifactStore,
       artifactsRepo: runtime.artifactsRepo,

@@ -10,6 +10,7 @@ import {
   assertFileContains,
   assertFileNotContains,
   assertGeneratedApiBehavior,
+  assertGeneratedApiRuntimeBehavior,
   assertJsonPathEquals,
   assertJsonPathIncludes,
   assertRequiredArtifacts,
@@ -84,7 +85,7 @@ export interface EvalSummary {
   averageCommandChecksPerCase: number;
 }
 
-export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: string, result: RunDemoResult, options: { durationMs?: number } = {}): Promise<EvalCaseResult> {
+export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: string, result: RunDemoResult, options: { durationMs?: number; runtimeApi?: boolean } = {}): Promise<EvalCaseResult> {
   const evalCase = typeof evalCaseOrPrompt === "string" ? caseFromDomainSpec(evalCaseOrPrompt, result.domainSpec) : evalCaseOrPrompt;
   const root = result.finalPackageDir;
   const failures: EvalFailure[] = [];
@@ -184,6 +185,10 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const entitySlug = traceDomainSpec?.primaryEntity?.slug ?? result.domainSpec.primaryEntity.slug;
   const apiStatuses = traceDomainSpec?.workflowStatuses ?? evalCase.expected.requiredStatuses;
   failures.push(...await assertGeneratedApiBehavior(root, entitySlug, apiStatuses));
+  if (options.runtimeApi) {
+    const apiFields = traceDomainSpec?.primaryEntity?.fields ?? result.domainSpec.primaryEntity.fields;
+    failures.push(...await assertGeneratedApiRuntimeBehavior(root, entitySlug, apiStatuses, apiFields));
+  }
 
   const appNameAppearsInApp = containsText(appSurface, evalCase.expected.appName);
   const primaryEntityAppearsInApp = containsText(appSurface, evalCase.expected.primaryEntity);
@@ -515,6 +520,14 @@ const hardGateCodes = new Set([
   "api_status_update_missing",
   "api_required_field_validation_missing",
   "api_status_validation_missing",
+  "api_runtime_app_path_invalid",
+  "api_runtime_server_missing",
+  "api_runtime_health_failed",
+  "api_runtime_list_failed",
+  "api_runtime_create_failed",
+  "api_runtime_created_record_missing",
+  "api_runtime_status_update_failed",
+  "api_runtime_failed",
   "seed_data_missing",
   "seed_data_invalid",
   "secret_leaked"

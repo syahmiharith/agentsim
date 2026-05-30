@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import type { FieldSpec } from "../domain/domain-spec.js";
 import type { EvalCommandExpectation, EvalFailure } from "./types.js";
 
 const outputCap = 4096;
@@ -154,6 +156,87 @@ export async function assertGeneratedApiBehavior(rootDir: string, entitySlug: st
     failures.push(failure("seed_data_invalid", `Generated seed data is not valid JSON: ${seedPath}`, "error", seedPath, "valid JSON", error instanceof Error ? error.message : String(error)));
   }
   return failures;
+}
+
+export async function assertGeneratedApiRuntimeBehavior(rootDir: string, entitySlug: string, statuses: string[], fields: FieldSpec[] = []): Promise<EvalFailure[]> {
+  const appDir = safeResolve(rootDir, "app");
+  if (!appDir) {
+    return [failure("api_runtime_app_path_invalid", "Generated app path escapes eval root.", "error", "app")];
+  }
+  const serverSource = await readText(rootDir, "app/server.js");
+  if (serverSource === undefined) {
+    return [failure("api_runtime_server_missing", "Generated API server is missing.", "error", "app/server.js")];
+  }
+
+  const port = await getOpenPort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["server.js"], {
+    cwd: appDir,
+    shell: false,
+    windowsHide: true,
+    env: {
+      PATH: process.env.PATH ?? "",
+      Path: process.env.Path ?? "",
+      SystemRoot: process.env.SystemRoot ?? "",
+      TEMP: process.env.TEMP ?? "",
+      TMP: process.env.TMP ?? "",
+      CI: process.env.CI ?? "1",
+      NODE_ENV: "test",
+      PORT: String(port)
+    }
+  });
+
+  let output = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    output = `${output}${chunk.toString("utf8")}`.slice(0, outputCap);
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    output = `${output}${chunk.toString("utf8")}`.slice(0, outputCap);
+  });
+
+  try {
+    await waitForHealth(baseUrl);
+    const health = await fetchJson(`${baseUrl}/api/health`);
+    if (health.status !== 200 || health.body?.ok !== true) {
+      return [failure("api_runtime_health_failed", "Generated API health route did not return ok.", "error", "app/server.js", { ok: true }, health.body)];
+    }
+
+    const listBefore = await fetchJson(`${baseUrl}/api/${entitySlug}`);
+    if (listBefore.status !== 200 || !Array.isArray(listBefore.body?.[entitySlug])) {
+      return [failure("api_runtime_list_failed", "Generated API list route did not return the entity collection.", "error", "app/server.js")];
+    }
+
+    const createResponse = await fetchJson(`${baseUrl}/api/${entitySlug}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(createRuntimeRecord(fields))
+    });
+    if (createResponse.status !== 201) {
+      return [failure("api_runtime_create_failed", "Generated API create route did not accept a valid record.", "error", "app/server.js", 201, createResponse)];
+    }
+
+    const listAfter = await fetchJson(`${baseUrl}/api/${entitySlug}`);
+    const records = listAfter.body?.[entitySlug];
+    if (listAfter.status !== 200 || !Array.isArray(records) || records.length === 0 || typeof records[0]?.id !== "string") {
+      return [failure("api_runtime_created_record_missing", "Generated API did not return a created record with an id.", "error", "app/server.js")];
+    }
+
+    const nextStatus = statuses[1] ?? statuses[0] ?? records[0].status;
+    const patchResponse = await fetchJson(`${baseUrl}/api/${entitySlug}/${records[0].id}/status`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: nextStatus })
+    });
+    if (patchResponse.status !== 200) {
+      return [failure("api_runtime_status_update_failed", "Generated API status update route did not accept a valid status.", "error", "app/server.js", 200, patchResponse)];
+    }
+
+    return [];
+  } catch (error) {
+    return [failure("api_runtime_failed", "Generated API runtime behavior check failed.", "error", "app/server.js", undefined, error instanceof Error ? error.message : String(error))];
+  } finally {
+    await stopChild(child);
+  }
 }
 
 export function resolveDotPath(value: unknown, path: string): unknown {
@@ -319,6 +402,91 @@ async function runBoundedCommand(argv: string[], cwd: string, timeoutMs: number)
       resolvePromise({ exitCode, timedOut: false, output: output.slice(0, outputCap) });
     });
   });
+}
+
+async function getOpenPort(): Promise<number> {
+  return await new Promise((resolvePort, rejectPort) => {
+    const server = createServer();
+    server.on("error", rejectPort);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : undefined;
+      server.close(() => {
+        if (port) {
+          resolvePort(port);
+        } else {
+          rejectPort(new Error("Could not allocate a local port."));
+        }
+      });
+    });
+  });
+}
+
+async function waitForHealth(baseUrl: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}/api/health`);
+      if (response.ok) {
+        return;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+  throw new Error(`Timed out waiting for generated API health route: ${lastError instanceof Error ? lastError.message : "no response"}`);
+}
+
+async function fetchJson(url: string, init?: RequestInit): Promise<{ status: number; body?: Record<string, any> }> {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: text ? JSON.parse(text) as Record<string, any> : undefined
+  };
+}
+
+function createRuntimeRecord(fields: FieldSpec[]): Record<string, string | number> {
+  return Object.fromEntries(fields.map((field) => [field.name, runtimeValueForField(field)]));
+}
+
+function runtimeValueForField(field: FieldSpec): string | number {
+  if (field.type === "number") {
+    return 1;
+  }
+  if (field.type === "select") {
+    return field.options?.[0] ?? "";
+  }
+  if (field.type === "date") {
+    return "2026-06-01";
+  }
+  if (field.type === "datetime") {
+    return "2026-06-01T10:00";
+  }
+  return `Runtime ${field.label}`;
+}
+
+async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.killed) {
+    return;
+  }
+  await new Promise<void>((resolveStop) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolveStop();
+    }, 1_000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolveStop();
+    });
+    child.kill();
+  });
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
 const defaultTraceFiles = [

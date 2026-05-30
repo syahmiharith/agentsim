@@ -3,25 +3,54 @@ import { askHumanTool, createArtifactTool, listFilesTool, readFileTool, runComma
 
 export function createToolRuntime(context: ToolContext): ToolRuntime {
   return {
-    readFile(input) {
+    async readFile(input) {
+      await assertToolAllowed(context, readFileTool.name);
       return readFileTool.execute(input, context);
     },
-    writeFile(input) {
+    async writeFile(input) {
+      await assertToolAllowed(context, writeFileTool.name);
       return writeFileTool.execute(input, context);
     },
-    listFiles(input) {
+    async listFiles(input) {
+      await assertToolAllowed(context, listFilesTool.name);
       return listFilesTool.execute(input, context);
     },
-    createArtifact(input) {
+    async createArtifact(input) {
+      await assertToolAllowed(context, createArtifactTool.name);
       return createArtifactTool.execute(input, context);
     },
-    runCommand(input) {
+    async runCommand(input) {
+      await assertToolAllowed(context, runCommandTool.name);
       return runCommandTool.execute(input, context);
     },
-    askHuman(input) {
+    async askHuman(input) {
+      await assertToolAllowed(context, askHumanTool.name);
       return askHumanTool.execute(input, context);
     }
   };
+}
+
+export async function assertToolAllowed(context: ToolContext, toolName: string): Promise<void> {
+  const policy = context.contextPolicy ?? context.contextPackage?.policy;
+  if (!policy) {
+    return;
+  }
+  if (policy.allowedTools.includes(toolName)) {
+    return;
+  }
+  await context.eventStore?.append({
+    level: "warn",
+    name: "tool.blocked_by_policy",
+    message: `Tool ${toolName} blocked by context policy.`,
+    data: {
+      toolName,
+      allowedTools: policy.allowedTools,
+      contextPackageId: context.contextPackage?.id,
+      taskId: context.contextPackage?.taskId,
+      stepId: context.contextPackage?.stepId
+    }
+  });
+  throw new Error(`Tool ${toolName} is not allowed by the active context policy.`);
 }
 
 export async function hasApprovedAction(action: string, approvalsRepo?: ToolContext["approvalsRepo"]): Promise<boolean> {

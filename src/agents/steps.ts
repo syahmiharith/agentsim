@@ -44,6 +44,17 @@ export const agentSteps: AgentStep[] = [
     outputType: "app",
     requiredInputs: ["task-breakdown", "architecture", "api-plan"],
     reviewRequired: true,
+    contextPolicy: {
+      requiredKinds: ["user_goal", "task", "domain_spec", "artifact"],
+      allowedArtifactTypes: ["task-breakdown", "architecture", "api-plan"],
+      maxCharsPerItem: 1800,
+      maxTotalChars: 12000,
+      includeDomainSpec: true,
+      includeMessages: true,
+      includeDecisions: true,
+      includeApprovals: true,
+      allowedTools: ["write_file"]
+    },
     async execute(context): Promise<AgentStepResult> {
       if (!context.tools) {
         throw new Error("builder-app requires the orchestrator tool runtime.");

@@ -19,8 +19,10 @@ Maintainer-local scripts:
 
 ```bash
 pnpm eval:domain
+pnpm eval:runtime
 pnpm eval:throughput
 pnpm eval
+pnpm eval:compare --base outputs/evals/base.json --head outputs/evals/latest.json
 ```
 
 ## Philosophy
@@ -50,6 +52,8 @@ Suites:
 - `apiBehaviorPresent`: static confirmation that the generated local API keeps
   health, list, create, status-update, required-field validation, and status
   validation behavior.
+- `pnpm eval:runtime`: optional heavier smoke eval that starts the generated
+  local API, waits for health, and exercises list/create/status routes.
 - `seedDataPresent`: confirmation that generated app seed data exists and is
   valid JSON.
 - `commandChecksRun`: bounded eval-level commands executed with contained cwd,
@@ -103,11 +107,13 @@ Use the report comparison helper in code when comparing two JSON reports. It
 tracks accepted-run delta, average quality delta, failure category changes,
 hard-gate regressions, and per-case quality regressions.
 
+The `pnpm eval:compare` command prints this comparison and exits nonzero when a
+hard-gate regression is detected.
+
 ## Current Limits
 
-The API behavior check is intentionally static. It proves expected generated
-route and validation code is present, but it does not start the server or run a
-browser end-to-end flow. Evals do not prove hosted production readiness,
-multi-user concurrency, authentication, durable persistence, or third-party
-integrations. Command checks are deliberately bounded and are not a general
-shell scripting facility.
+The default API behavior check is intentionally static. The runtime API eval
+starts the local generated API, but it still does not run a browser end-to-end
+flow. Evals do not prove hosted production readiness, multi-user concurrency,
+authentication, durable persistence, or third-party integrations. Command checks
+are deliberately bounded and are not a general shell scripting facility.

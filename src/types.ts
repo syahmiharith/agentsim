@@ -361,6 +361,8 @@ export interface ToolContext {
   runId: string;
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
+  contextPackage?: ContextPackage;
+  contextPolicy?: ContextPolicy;
   eventStore?: EventStore;
   artifactStore?: ArtifactStore;
   artifactsRepo?: { createArtifactRecord(artifact: Artifact): Promise<Artifact> };

@@ -246,6 +246,8 @@ The risk-aware tool runtime defines `read_file`, `write_file`, `list_files`, `cr
 - `create_artifact` uses the active artifact store and repository, not a disconnected store.
 - `run_command` is dangerous, approval-required, allowlisted, timed, output-capped, and uses a sanitized environment.
 - Command execution remains disabled unless explicitly allowed.
+- When a context policy is active, tools must also be listed in
+  `allowedTools`; denied calls emit `tool.blocked_by_policy`.
 - Approval-required tools create or require approval state instead of silently executing.
 - Every tool call appends a `tool.called` event.
 - Command results are written to `state/command-results.jsonl` and `final-package/trace/command-results.jsonl`.
@@ -254,7 +256,7 @@ Approval commands operate on local state only. They do not send emails, deploy c
 
 ## Review And Evals
 
-Final package validation is converted into a review result. A passing verdict completes the run. A failing verdict fails the run. A recoverable revise verdict emits a clear event when repair is disabled, which is the default. The experimental repair path can create a bounded fix task, but automated fix execution is intentionally not claimed yet.
+Final package validation is converted into a review result. A passing verdict completes the run. A failing verdict fails the run. A recoverable revise verdict emits a clear event when repair is disabled, which is the default. The experimental repair path can create a bounded fix task and apply narrow deterministic repairs for missing derived trace files, generated app files, or exported artifact files. It does not perform broad AI self-repair.
 
 `pnpm eval:mock` runs deterministic mock evals across several software-freelance prompts and writes `outputs/evals/latest.json` and `outputs/evals/latest.md`, including duration, validation status, and a coarse failure category.
 
