@@ -1,29 +1,41 @@
+#!/usr/bin/env node
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadDotEnv } from "./config.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
+import { startDashboard } from "./tui/run-inspector.js";
 import { runDemo } from "./workflow.js";
 
+type CliCommand = "run" | "demo" | "dashboard" | "tui";
+
 interface CliOptions {
-  command?: string;
+  command?: CliCommand | string;
   goal?: string;
   providerSelection: ProviderSelection;
   outputRoot: string;
   runId?: string;
 }
 
-async function main(argv: string[]): Promise<void> {
+export async function main(argv: string[]): Promise<void> {
   loadDotEnv();
   const options = parseArgs(argv);
 
-  if (options.command !== "demo") {
+  if (!isSupportedCommand(options.command)) {
     printUsage();
     process.exitCode = 1;
     return;
   }
 
+  if (options.command === "dashboard" || options.command === "tui") {
+    await startDashboard({
+      outputRoot: resolve(options.outputRoot),
+      runId: options.runId ?? options.goal
+    });
+    return;
+  }
+
   if (!options.goal) {
-    console.error("Missing goal. Example: pnpm demo \"Build an inventory request system for a flower company\"");
+    console.error("Missing goal. Example: agentsim run \"Build an inventory request system for a flower company\"");
     process.exitCode = 1;
     return;
   }
@@ -36,7 +48,7 @@ async function main(argv: string[]): Promise<void> {
     modelProvider: provider
   });
 
-  console.log(`Agentsim demo completed.`);
+  console.log(`Agentsim run completed.`);
   console.log(`Run ID: ${result.taskRun.id}`);
   console.log(`Model mode: ${result.taskRun.modelMode}`);
   console.log(`Final package: ${result.finalPackageDir}`);
@@ -81,8 +93,18 @@ export function parseArgs(argv: string[]): CliOptions {
   };
 }
 
+function isSupportedCommand(command: string | undefined): command is CliCommand {
+  return command === "run" || command === "demo" || command === "dashboard" || command === "tui";
+}
+
 function printUsage(): void {
   console.error(`Usage:
+  agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
+  agentsim dashboard [runId] [--out-dir outputs]
+  agentsim tui [runId] [--out-dir outputs]
+  pnpm agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
+  pnpm agentsim dashboard [runId] [--out-dir outputs]
+  pnpm agentsim tui [runId] [--out-dir outputs]
   pnpm demo "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
 `);
 }
