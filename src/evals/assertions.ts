@@ -87,29 +87,73 @@ export async function assertContextEvalOk(rootDir: string): Promise<EvalFailure[
 }
 
 export async function assertCommandPasses(rootDir: string, commandCheck: EvalCommandExpectation): Promise<EvalFailure[]> {
+  const severity = commandCheck.optional ? "warn" : "error";
   if (commandCheck.timeoutMs <= 0 || commandCheck.timeoutMs > 120_000) {
-    return [failure("command_timeout_invalid", `Command timeout must be between 1ms and 120000ms: ${commandCheck.command}`, "error", commandCheck.cwd)];
+    return [failure("command_timeout_invalid", `Command timeout must be between 1ms and 120000ms: ${commandCheck.command}`, severity, commandCheck.cwd)];
   }
   const cwd = safeResolve(rootDir, commandCheck.cwd);
   if (!cwd) {
-    return [failure("command_cwd_escape", `Command cwd escapes eval root: ${commandCheck.cwd}`, "error", commandCheck.cwd)];
+    return [failure("command_cwd_escape", `Command cwd escapes eval root: ${commandCheck.cwd}`, severity, commandCheck.cwd)];
   }
-  const argv = tokenizeCommand(commandCheck.command);
-  if (argv.length === 0) {
-    return [failure("command_empty", "Command must not be empty.", "error", commandCheck.cwd)];
+  const parsed = tokenizeCommand(commandCheck.command);
+  if (!parsed.ok) {
+    return [failure("command_unsupported_syntax", parsed.error, severity, commandCheck.cwd, "simple command argv", commandCheck.command)];
   }
-  const result = await runBoundedCommand(argv, cwd, commandCheck.timeoutMs);
+  if (parsed.argv.length === 0) {
+    return [failure("command_empty", "Command must not be empty.", severity, commandCheck.cwd)];
+  }
+  const result = await runBoundedCommand(parsed.argv, cwd, commandCheck.timeoutMs);
   if (result.exitCode === 0 && !result.timedOut) {
     return [];
   }
   return [failure(
     "command_failed",
     `Command failed: ${commandCheck.command}`,
-    commandCheck.optional ? "warn" : "error",
+    severity,
     commandCheck.cwd,
     0,
     { exitCode: result.exitCode, timedOut: result.timedOut, output: result.output }
   )];
+}
+
+export async function assertGeneratedApiBehavior(rootDir: string, entitySlug: string, statuses: string[]): Promise<EvalFailure[]> {
+  const failures: EvalFailure[] = [];
+  const serverPath = "app/server.js";
+  const serverSource = await readText(rootDir, serverPath);
+  if (serverSource === undefined) {
+    return [failure("api_server_missing", "Generated API server is missing.", "error", serverPath)];
+  }
+  if (!serverSource.includes("/api/health")) {
+    failures.push(failure("api_health_missing", "Generated API server is missing the health route.", "error", serverPath, "/api/health"));
+  }
+  if (!serverSource.includes('"/api/" + config.entitySlug')) {
+    failures.push(failure("api_list_missing", "Generated API server is missing the entity list route.", "error", serverPath, `/api/${entitySlug}`));
+  }
+  if (!serverSource.includes('request.method === "POST"') || !serverSource.includes("validate(body)")) {
+    failures.push(failure("api_create_missing", "Generated API server is missing create route validation behavior.", "error", serverPath, "POST create with validate(body)"));
+  }
+  if (!serverSource.includes("/([^/]+)/status") || !serverSource.includes('request.method === "PATCH"')) {
+    failures.push(failure("api_status_update_missing", "Generated API server is missing status update behavior.", "error", serverPath, `PATCH /api/${entitySlug}/:id/status`));
+  }
+  if (!serverSource.includes("field.required") || !serverSource.includes("is required")) {
+    failures.push(failure("api_required_field_validation_missing", "Generated API server is missing required field validation.", "error", serverPath));
+  }
+  if (statuses.length > 0 && (!serverSource.includes("statuses.has(body.status)") || !serverSource.includes("Unknown status"))) {
+    failures.push(failure("api_status_validation_missing", "Generated API server is missing status validation.", "error", serverPath, statuses));
+  }
+
+  const seedPath = `app/data/${entitySlug}.json`;
+  const seedText = await readText(rootDir, seedPath);
+  if (seedText === undefined) {
+    failures.push(failure("seed_data_missing", `Generated seed data is missing: ${seedPath}`, "error", seedPath));
+    return failures;
+  }
+  try {
+    JSON.parse(seedText);
+  } catch (error) {
+    failures.push(failure("seed_data_invalid", `Generated seed data is not valid JSON: ${seedPath}`, "error", seedPath, "valid JSON", error instanceof Error ? error.message : String(error)));
+  }
+  return failures;
 }
 
 export function resolveDotPath(value: unknown, path: string): unknown {
@@ -184,9 +228,49 @@ function deepEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function tokenizeCommand(command: string): string[] {
-  const tokens = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  return tokens.map((token) => token.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1"));
+function tokenizeCommand(command: string): { ok: true; argv: string[] } | { ok: false; error: string } {
+  const argv: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | undefined;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        argv.push(current);
+        current = "";
+      }
+      continue;
+    }
+    if (char === "$" && command[index + 1] === "(") {
+      return { ok: false, error: "Command contains unsupported shell substitution syntax." };
+    }
+    if (/[;&|<>`]/.test(char)) {
+      return { ok: false, error: `Command contains unsupported shell operator: ${char}` };
+    }
+    current += char;
+  }
+
+  if (quote) {
+    return { ok: false, error: "Command contains an unterminated quoted argument." };
+  }
+  if (current.length > 0) {
+    argv.push(current);
+  }
+  return { ok: true, argv };
 }
 
 async function runBoundedCommand(argv: string[], cwd: string, timeoutMs: number): Promise<{ exitCode: number | null; timedOut: boolean; output: string }> {

@@ -6,6 +6,7 @@ import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { scoreEvalRun, summarizeEvalResults } from "../src/evals/scoring.js";
 import type { DomainSpec } from "../src/domain/domain-spec.js";
+import type { EvalCase } from "../src/evals/types.js";
 import type { RunDemoResult } from "../src/orchestrator.js";
 
 describe("eval scoring", () => {
@@ -117,6 +118,42 @@ describe("eval scoring", () => {
     expect(result.failureCategory).toBe("runtime");
     expect(result.failures).toContainEqual(expect.objectContaining({ code: "template_text_leaked" }));
   });
+
+  it("records command coverage and optional command warnings without failing the hard gate", async () => {
+    const spec = inferDomainSpec("Build an inventory request system for a flower company");
+    const result = await scoreEvalRun(createEvalCase(spec, {
+      commands: [
+        { command: "node --version", cwd: ".", timeoutMs: 5_000 },
+        { command: "node -e \"process.exit(2)\"", cwd: ".", timeoutMs: 5_000, optional: true }
+      ]
+    }), "run", await createEvalFixture(spec), { durationMs: 1 });
+
+    expect(result.hardGatePassed).toBe(true);
+    expect(result.commandChecksRun).toBe(2);
+    expect(result.requiredCommandChecksRun).toBe(1);
+    expect(result.commandChecksPassed).toBe(true);
+    expect(result.warningCount).toBe(1);
+    expect(result.errorCount).toBe(0);
+    expect(result.failures).toContainEqual(expect.objectContaining({ code: "command_failed", severity: "warn" }));
+  });
+
+  it("classifies generated API behavior failures separately", async () => {
+    const spec = inferDomainSpec("Build a clinic appointment system");
+    const result = await scoreEvalRun(createEvalCase(spec), "run", await createEvalFixture(spec, {
+      serverSource: "export {};\n"
+    }), { durationMs: 1 });
+
+    expect(result.apiBehaviorPresent).toBe(false);
+    expect(result.seedDataPresent).toBe(true);
+    expect(result.hardGatePassed).toBe(false);
+    expect(result.failureCategory).toBe("api_behavior");
+    expect(result.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "api_health_missing" }),
+      expect.objectContaining({ code: "api_list_missing" }),
+      expect.objectContaining({ code: "api_create_missing" }),
+      expect.objectContaining({ code: "api_status_update_missing" })
+    ]));
+  });
 });
 
 async function createEvalFixture(
@@ -127,13 +164,14 @@ async function createEvalFixture(
     omitTraceFiles?: string[];
     appSource?: string;
     appReadme?: string;
+    serverSource?: string;
   } = {}
 ): Promise<RunDemoResult> {
   const finalPackageDir = join(tmpdir(), `agentsim-eval-score-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const appSource = options.appSource ?? renderAppSource(spec);
   const appReadme = options.appReadme ?? `# ${spec.appName}\n\nManage ${spec.primaryEntity.pluralName}.`;
   const omittedTraceFiles = new Set(options.omitTraceFiles ?? []);
-  await writeRequiredFinalPackageFiles(finalPackageDir, spec, appSource, appReadme);
+  await writeRequiredFinalPackageFiles(finalPackageDir, spec, appSource, appReadme, options.serverSource);
 
   if (!omittedTraceFiles.has("domain-spec.json")) {
     await writeFixtureFile(finalPackageDir, "trace/domain-spec.json", JSON.stringify(options.traceDomainSpec ?? spec, null, 2));
@@ -185,20 +223,21 @@ async function createEvalFixture(
   };
 }
 
-async function writeRequiredFinalPackageFiles(finalPackageDir: string, spec: DomainSpec, appSource: string, appReadme: string): Promise<void> {
+async function writeRequiredFinalPackageFiles(finalPackageDir: string, spec: DomainSpec, appSource: string, appReadme: string, serverSource?: string): Promise<void> {
   for (const relativePath of softwareFreelancePack.requiredFinalPackageFiles) {
-    await writeFixtureFile(finalPackageDir, relativePath, requiredFileContent(relativePath, spec, appSource, appReadme));
+    await writeFixtureFile(finalPackageDir, relativePath, requiredFileContent(relativePath, spec, appSource, appReadme, serverSource));
   }
+  await writeFixtureFile(finalPackageDir, `app/data/${spec.primaryEntity.slug}.json`, `${JSON.stringify(spec.seedRecords, null, 2)}\n`);
 }
 
-function requiredFileContent(relativePath: string, spec: DomainSpec, appSource: string, appReadme: string): string {
+function requiredFileContent(relativePath: string, spec: DomainSpec, appSource: string, appReadme: string, serverSource?: string): string {
   switch (relativePath) {
     case "app/package.json":
       return JSON.stringify({ name: spec.appSlug, scripts: { build: "echo build-ok" } }, null, 2);
     case "app/src/App.tsx":
       return appSource;
     case "app/server.js":
-      return "export {};\n";
+      return serverSource ?? renderServerSource();
     case "app/README.md":
       return appReadme;
     case "app/index.html":
@@ -210,6 +249,25 @@ function requiredFileContent(relativePath: string, spec: DomainSpec, appSource: 
     default:
       return `# ${relativePath}\n\n${spec.appName} supports ${spec.primaryEntity.name} workflows for ${spec.primaryEntity.pluralName}.\n`;
   }
+}
+
+function createEvalCase(spec: DomainSpec, overrides: Partial<EvalCase["expected"]> = {}): EvalCase {
+  return {
+    id: "case",
+    suite: "smoke",
+    difficulty: "smoke",
+    prompt: spec.sourceGoal,
+    expected: {
+      appName: spec.appName,
+      primaryEntity: spec.primaryEntity.name,
+      requiredFields: spec.primaryEntity.fields.filter((field) => field.required).map((field) => field.name),
+      requiredStatuses: spec.workflowStatuses,
+      requiredArtifacts: ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      requiredPhrases: [],
+      forbiddenPhrases: [],
+      ...overrides
+    }
+  };
 }
 
 async function writeOtherTraceFiles(finalPackageDir: string, omittedFileNames: Set<string>): Promise<void> {
@@ -262,4 +320,30 @@ function renderAppSource(spec: DomainSpec): string {
     fields: spec.primaryEntity.fields.map((field) => ({ name: field.name, label: field.label })),
     statuses: spec.workflowStatuses
   }, null, 2)};`;
+}
+
+function renderServerSource(): string {
+  return `
+const config = { entitySlug: "requests", collectionKey: "requests", fields: [], statuses: [] };
+const statuses = new Set(config.statuses);
+function validate(body) {
+  for (const field of config.fields) {
+    if (field.required && !body[field.name]) return field.label + " is required.";
+  }
+  return undefined;
+}
+createServer(async (request, response) => {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1:4178");
+  if (request.method === "GET" && url.pathname === "/api/health") return;
+  if (request.method === "GET" && url.pathname === "/api/" + config.entitySlug) return;
+  if (request.method === "POST" && url.pathname === "/api/" + config.entitySlug) {
+    const validationError = validate(body);
+    return;
+  }
+  const statusMatch = url.pathname.match(new RegExp("^/api/" + config.entitySlug + "/([^/]+)/status$"));
+  if (request.method === "PATCH" && statusMatch) {
+    if (!statuses.has(body.status)) return "Unknown status";
+  }
+});
+`;
 }

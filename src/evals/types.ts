@@ -55,6 +55,7 @@ export type EvalFailureCategory =
   | "domain_mismatch"
   | "run_status"
   | "command"
+  | "api_behavior"
   | "secret_redaction"
   | "runtime";
 

@@ -16,6 +16,9 @@
       ],
       "forbiddenPhrases": [
         { "path": "app/src/App.tsx", "terms": ["flower company", "supplier", "white roses"] }
+      ],
+      "commands": [
+        { "command": "node --check server.js", "cwd": "app", "timeoutMs": 5000 }
       ]
     }
   },

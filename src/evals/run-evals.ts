@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadDotEnv } from "../config.js";
@@ -18,7 +19,15 @@ export interface EvalRunnerOptions {
 }
 
 export interface EvalReport {
+  schemaVersion: 1;
   generatedAt: string;
+  gitCommit?: string;
+  environment: {
+    nodeVersion: string;
+    platform: string;
+    arch: string;
+    agentSimVersion: string;
+  };
   options: EvalRunnerOptions;
   summary: EvalSummary;
   results: EvalCaseResult[];
@@ -47,8 +56,11 @@ export async function runEvalBatch(options: EvalRunnerOptions): Promise<EvalRepo
     }
   });
 
-  const report = {
+  const report: EvalReport = {
+    schemaVersion: 1,
     generatedAt: new Date().toISOString(),
+    gitCommit: await getGitCommit(),
+    environment: await getReportEnvironment(),
     options,
     summary: summarizeEvalResults(results),
     results: results.sort((left, right) => left.caseId.localeCompare(right.caseId) || left.runId.localeCompare(right.runId))
@@ -126,6 +138,9 @@ function renderMarkdownReport(report: EvalReport): string {
     `Pass/fail: ${report.summary.passed}/${report.summary.total} passed`,
     `Average quality score: ${report.summary.averageQualityScore.toFixed(3)}`,
     `Accepted runs: ${report.summary.acceptedRuns}`,
+    `Warnings: ${report.summary.totalWarnings}`,
+    `Errors: ${report.summary.totalErrors}`,
+    `Command checks: ${report.summary.commandChecksRun} total / ${report.summary.requiredCommandChecksRun} required`,
     `p50 duration: ${report.summary.p50DurationMs}ms`,
     `p95 duration: ${report.summary.p95DurationMs}ms`,
     "",
@@ -146,7 +161,7 @@ function renderMarkdownReport(report: EvalReport): string {
 
 function renderCsvReport(report: EvalReport): string {
   const rows = [
-    ["caseId", "suite", "difficulty", "runId", "hardGatePassed", "accepted", "qualityScore", "durationMs", "failureCategory", "failureCount", "prompt"],
+    ["caseId", "suite", "difficulty", "runId", "hardGatePassed", "accepted", "qualityScore", "durationMs", "failureCategory", "failureCount", "warningCount", "errorCount", "commandChecksRun", "apiBehaviorPresent", "seedDataPresent", "prompt"],
     ...report.results.map((result) => [
       result.caseId,
       result.suite,
@@ -158,6 +173,11 @@ function renderCsvReport(report: EvalReport): string {
       String(result.durationMs),
       result.failureCategory,
       String(result.failures.length),
+      String(result.warningCount),
+      String(result.errorCount),
+      String(result.commandChecksRun),
+      String(result.apiBehaviorPresent),
+      String(result.seedDataPresent),
       result.prompt
     ])
   ];
@@ -210,6 +230,13 @@ function createRuntimeFailure(evalCase: EvalCase, runId: string, finalPackagePat
     requiredFieldsAppearInApp: false,
     promptLeakageDetected: false,
     templateLeakageDetected: false,
+    apiBehaviorPresent: false,
+    seedDataPresent: false,
+    commandChecksPassed: false,
+    commandChecksRun: evalCase.expected.commands?.length ?? 0,
+    requiredCommandChecksRun: evalCase.expected.commands?.filter((command) => !command.optional).length ?? 0,
+    warningCount: 0,
+    errorCount: 1,
     hardGatePassed: false,
     accepted: false,
     acceptanceCriteriaScore: 0,
@@ -223,6 +250,38 @@ function createRuntimeFailure(evalCase: EvalCase, runId: string, finalPackagePat
     failureCategory: "runtime",
     failures
   };
+}
+
+async function getReportEnvironment(): Promise<EvalReport["environment"]> {
+  return {
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    agentSimVersion: await readPackageVersion()
+  };
+}
+
+async function readPackageVersion(): Promise<string> {
+  try {
+    const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8")) as { version?: string };
+    return packageJson.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function getGitCommit(): Promise<string | undefined> {
+  return await new Promise((resolveCommit) => {
+    const child = execFile("git", ["rev-parse", "HEAD"], { cwd: process.cwd(), windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolveCommit(undefined);
+        return;
+      }
+      const commit = stdout.trim();
+      resolveCommit(commit.length > 0 ? commit : undefined);
+    });
+    child.on("error", () => resolveCommit(undefined));
+  });
 }
 
 function createEvalRunId(evalCase: EvalCase, repeatIndex: number, caseIndex: number): string {

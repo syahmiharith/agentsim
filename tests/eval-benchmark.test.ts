@@ -85,6 +85,7 @@ async function createEvalFixture(spec: DomainSpec): Promise<RunDemoResult> {
   for (const relativePath of softwareFreelancePack.requiredFinalPackageFiles) {
     await writeFixtureFile(finalPackageDir, relativePath, contentFor(relativePath, spec));
   }
+  await writeFixtureFile(finalPackageDir, `app/data/${spec.primaryEntity.slug}.json`, `${JSON.stringify(spec.seedRecords, null, 2)}\n`);
   for (const relativePath of softwareFreelancePack.requiredTraceFiles) {
     await writeFixtureFile(finalPackageDir, relativePath, traceContentFor(relativePath, spec));
   }
@@ -142,6 +143,9 @@ function contentFor(relativePath: string, spec: DomainSpec): string {
   if (relativePath === "app/package.json") {
     return JSON.stringify({ name: spec.appSlug }, null, 2);
   }
+  if (relativePath === "app/server.js") {
+    return renderServerSource();
+  }
   if (relativePath.startsWith("review/")) {
     if (relativePath === "review/qa-report.md") {
       return `# QA Report\n\n## Generated App Validation\n\n${spec.appName} passed.`;
@@ -188,6 +192,32 @@ function renderAppSource(spec: DomainSpec): string {
   }, null, 2)};`;
 }
 
+function renderServerSource(): string {
+  return `
+const config = { entitySlug: "requests", collectionKey: "requests", fields: [], statuses: [] };
+const statuses = new Set(config.statuses);
+function validate(body) {
+  for (const field of config.fields) {
+    if (field.required && !body[field.name]) return field.label + " is required.";
+  }
+  return undefined;
+}
+createServer(async (request, response) => {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1:4178");
+  if (request.method === "GET" && url.pathname === "/api/health") return;
+  if (request.method === "GET" && url.pathname === "/api/" + config.entitySlug) return;
+  if (request.method === "POST" && url.pathname === "/api/" + config.entitySlug) {
+    const validationError = validate(body);
+    return;
+  }
+  const statusMatch = url.pathname.match(new RegExp("^/api/" + config.entitySlug + "/([^/]+)/status$"));
+  if (request.method === "PATCH" && statusMatch) {
+    if (!statuses.has(body.status)) return "Unknown status";
+  }
+});
+`;
+}
+
 function resultStub(overrides: { accepted: boolean; hardGatePassed: boolean; qualityScore: number; durationMs: number; failureCategory: EvalFailureCategory }) {
   return {
     caseId: "case",
@@ -210,6 +240,13 @@ function resultStub(overrides: { accepted: boolean; hardGatePassed: boolean; qua
     requiredFieldsAppearInApp: overrides.hardGatePassed,
     promptLeakageDetected: false,
     templateLeakageDetected: false,
+    apiBehaviorPresent: overrides.hardGatePassed,
+    seedDataPresent: overrides.hardGatePassed,
+    commandChecksPassed: overrides.hardGatePassed,
+    commandChecksRun: 0,
+    requiredCommandChecksRun: 0,
+    warningCount: 0,
+    errorCount: overrides.hardGatePassed ? 0 : 1,
     hardGatePassed: overrides.hardGatePassed,
     accepted: overrides.accepted,
     acceptanceCriteriaScore: overrides.qualityScore,

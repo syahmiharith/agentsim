@@ -16,6 +16,10 @@
       ],
       "forbiddenPhrases": [
         { "path": "app/src/App.tsx", "terms": ["Barber Booking Desk", "Clinic Appointment Desk"] }
+      ],
+      "commands": [
+        { "command": "node --check server.js", "cwd": "app", "timeoutMs": 5000 },
+        { "command": "node --version", "cwd": "app", "timeoutMs": 5000, "optional": true }
       ]
     }
   },

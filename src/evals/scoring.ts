@@ -9,6 +9,7 @@ import {
   assertContextEvalOk,
   assertFileContains,
   assertFileNotContains,
+  assertGeneratedApiBehavior,
   assertJsonPathEquals,
   assertJsonPathIncludes,
   assertRequiredArtifacts,
@@ -39,6 +40,13 @@ export interface EvalCaseResult {
   requiredFieldsAppearInApp: boolean;
   promptLeakageDetected: boolean;
   templateLeakageDetected: boolean;
+  apiBehaviorPresent: boolean;
+  seedDataPresent: boolean;
+  commandChecksPassed: boolean;
+  commandChecksRun: number;
+  requiredCommandChecksRun: number;
+  warningCount: number;
+  errorCount: number;
   hardGatePassed: boolean;
   accepted: boolean;
   acceptanceCriteriaScore: number;
@@ -63,6 +71,12 @@ export interface EvalSummary {
   p50DurationMs: number;
   p95DurationMs: number;
   failureCategories: Record<string, number>;
+  totalWarnings: number;
+  totalErrors: number;
+  commandChecksRun: number;
+  requiredCommandChecksRun: number;
+  commandChecksPassed: number;
+  averageCommandChecksPerCase: number;
 }
 
 export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: string, result: RunDemoResult, options: { durationMs?: number } = {}): Promise<EvalCaseResult> {
@@ -141,6 +155,9 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     failures.push(...await assertCommandPasses(root, commandCheck));
   }
   failures.push(...await assertContextEvalOk(root));
+  const entitySlug = traceDomainSpec?.primaryEntity?.slug ?? result.domainSpec.primaryEntity.slug;
+  const apiStatuses = traceDomainSpec?.workflowStatuses ?? evalCase.expected.requiredStatuses;
+  failures.push(...await assertGeneratedApiBehavior(root, entitySlug, apiStatuses));
 
   const appNameAppearsInApp = containsText(appSurface, evalCase.expected.appName);
   const primaryEntityAppearsInApp = containsText(appSurface, evalCase.expected.primaryEntity);
@@ -152,6 +169,10 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const promptLeakageDetected = evalCase.prompt.trim().length > 0 && containsText(appSurface, evalCase.prompt);
   const templateLeakageDetected = detectsTemplateLeakage(fullSurface, evalCase.expected.appName);
   const secretLeakageDetected = await detectSecretLeakage(root, evalCase.prompt);
+  const commandChecksRun = evalCase.expected.commands?.length ?? 0;
+  const requiredCommandChecksRun = evalCase.expected.commands?.filter((command) => !command.optional).length ?? 0;
+  const warningCount = failures.filter((item) => item.severity === "warn").length;
+  const errorCount = failures.filter((item) => item.severity === "error").length;
 
   if (!appNameAppearsInApp) {
     failures.push({ code: "app_name_missing", message: `App surface does not contain app name ${evalCase.expected.appName}`, severity: "error", path: "app/src/App.tsx" });
@@ -178,7 +199,8 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     failures.push({ code: "secret_leaked", message: "Generated package contains a secret-looking token from the prompt.", severity: "error" });
   }
 
-  const commandFailures = failures.filter((item) => item.code === "command_failed" && item.severity === "error").length;
+  const commandFailures = failures.filter((item) => item.code.startsWith("command_") && item.severity === "error").length;
+  const apiFailures = failures.filter((item) => isApiBehaviorFailure(item) && item.severity === "error").length;
   const appFileFailures = failures.filter((item) => item.code === "final_package_file_missing" && requiredAppFiles.includes(item.path ?? "")).length;
   const requiredArtifactFailures = failures.filter((item) => item.code === "final_package_file_missing" || item.code === "trace_file_missing").length;
   const requiredPhraseFailures = failures.filter((item) => item.code === "required_phrase_missing").length;
@@ -188,7 +210,7 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const reviewFailures = failures.filter((item) => item.path?.startsWith("review/") && item.severity === "error").length;
 
   const acceptanceCriteriaScore = ratio(1 + evalCase.expected.requiredPhrases.reduce((sum, item) => sum + item.terms.length, 0), requiredPhraseFailures + (domainDocsMatch ? 0 : 1));
-  const runnableAppScore = ratio(requiredAppFiles.length + 1 + (evalCase.expected.commands?.filter((command) => !command.optional).length ?? 0), appFileFailures + (finalValidationOk ? 0 : 1) + commandFailures);
+  const runnableAppScore = ratio(requiredAppFiles.length + 1 + 2 + requiredCommandChecksRun, appFileFailures + (finalValidationOk ? 0 : 1) + apiFailures + commandFailures);
   const domainFidelityScore = ratio(
     2 + evalCase.expected.requiredFields.length + evalCase.expected.requiredStatuses.length + evalCase.expected.forbiddenPhrases.reduce((sum, item) => sum + item.terms.length, 0),
     domainFailures + forbiddenPhraseFailures
@@ -232,6 +254,13 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     requiredFieldsAppearInApp,
     promptLeakageDetected,
     templateLeakageDetected,
+    apiBehaviorPresent: !failures.some((failure) => failure.code.startsWith("api_") && failure.severity === "error"),
+    seedDataPresent: !failures.some((failure) => failure.code.startsWith("seed_data_") && failure.severity === "error"),
+    commandChecksPassed: !failures.some((failure) => failure.code.startsWith("command_") && failure.severity === "error"),
+    commandChecksRun,
+    requiredCommandChecksRun,
+    warningCount,
+    errorCount,
     hardGatePassed,
     accepted: hardGatePassed,
     acceptanceCriteriaScore,
@@ -262,7 +291,13 @@ export function summarizeEvalResults(results: EvalCaseResult[]): EvalSummary {
     averageQualityScore: roundScore(results.reduce((sum, result) => sum + result.qualityScore, 0) / Math.max(1, results.length)),
     p50DurationMs: percentile(results.map((result) => result.durationMs), 50),
     p95DurationMs: percentile(results.map((result) => result.durationMs), 95),
-    failureCategories
+    failureCategories,
+    totalWarnings: results.reduce((sum, result) => sum + result.warningCount, 0),
+    totalErrors: results.reduce((sum, result) => sum + result.errorCount, 0),
+    commandChecksRun: results.reduce((sum, result) => sum + result.commandChecksRun, 0),
+    requiredCommandChecksRun: results.reduce((sum, result) => sum + result.requiredCommandChecksRun, 0),
+    commandChecksPassed: results.filter((result) => result.commandChecksPassed).length,
+    averageCommandChecksPerCase: roundScore(results.reduce((sum, result) => sum + result.commandChecksRun, 0) / Math.max(1, results.length))
   };
 }
 
@@ -292,7 +327,10 @@ function categorizeFailures(failures: EvalFailure[], status: string): EvalFailur
   if (failures.some((failure) => failure.code === "secret_leaked")) {
     return "secret_redaction";
   }
-  if (failures.some((failure) => failure.code === "command_failed")) {
+  if (failures.some((failure) => isApiBehaviorFailure(failure))) {
+    return "api_behavior";
+  }
+  if (failures.some((failure) => failure.code.startsWith("command_"))) {
     return "command";
   }
   if (failures.some((failure) => failure.code === "final_package_file_missing" && failure.path?.startsWith("app/"))) {
@@ -361,6 +399,10 @@ function detectsTemplateLeakage(surface: string, expectedAppName: string): boole
   return expectedAppName !== "Client Request Tracker" && normalizedSurface.includes("client request tracker");
 }
 
+function isApiBehaviorFailure(failure: EvalFailure): boolean {
+  return failure.code.startsWith("api_") || failure.code.startsWith("seed_data_");
+}
+
 async function detectSecretLeakage(root: string, prompt: string): Promise<boolean> {
   const secrets = prompt.match(/(?:sk|pk|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{10,}/g) ?? [];
   if (secrets.length === 0) {
@@ -410,5 +452,18 @@ const hardGateCodes = new Set([
   "validation_result_missing",
   "final_package_validation_failed",
   "command_failed",
+  "command_unsupported_syntax",
+  "command_timeout_invalid",
+  "command_cwd_escape",
+  "command_empty",
+  "api_server_missing",
+  "api_health_missing",
+  "api_list_missing",
+  "api_create_missing",
+  "api_status_update_missing",
+  "api_required_field_validation_missing",
+  "api_status_validation_missing",
+  "seed_data_missing",
+  "seed_data_invalid",
   "secret_leaked"
 ]);
