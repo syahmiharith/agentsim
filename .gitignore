@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+outputs/
+.env
+.env.*
+!.env.example
+

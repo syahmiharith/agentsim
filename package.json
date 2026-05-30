@@ -1,0 +1,23 @@
+{
+  "name": "agentsim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Artifact-first AI organization layer for solo software freelancers.",
+  "scripts": {
+    "demo": "tsx src/cli.ts demo",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}
+
