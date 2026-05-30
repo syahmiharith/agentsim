@@ -24,6 +24,12 @@ describe("CLI parsing", () => {
     expect(options.outputRoot).toBe("custom-outputs");
   });
 
+  it("parses dashboard as the product TUI command", () => {
+    const options = parseArgs(["dashboard", "test-run"]);
+    expect(options.command).toBe("dashboard");
+    expect(options.goal).toBe("test-run");
+  });
+
   it("returns no goal when goal is missing", () => {
     const options = parseArgs(["run", "--mock"]);
     expect(options.goal).toBeUndefined();

@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadDotEnv } from "./config.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
-import { startRunInspector } from "./tui/run-inspector.js";
+import { startDashboard } from "./tui/run-inspector.js";
 import { runDemo } from "./workflow.js";
 
-type CliCommand = "run" | "demo" | "tui";
+type CliCommand = "run" | "demo" | "dashboard" | "tui";
 
 interface CliOptions {
   command?: CliCommand | string;
@@ -26,8 +26,8 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  if (options.command === "tui") {
-    await startRunInspector({
+  if (options.command === "dashboard" || options.command === "tui") {
+    await startDashboard({
       outputRoot: resolve(options.outputRoot),
       runId: options.runId ?? options.goal
     });
@@ -94,14 +94,16 @@ export function parseArgs(argv: string[]): CliOptions {
 }
 
 function isSupportedCommand(command: string | undefined): command is CliCommand {
-  return command === "run" || command === "demo" || command === "tui";
+  return command === "run" || command === "demo" || command === "dashboard" || command === "tui";
 }
 
 function printUsage(): void {
   console.error(`Usage:
   agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
+  agentsim dashboard [runId] [--out-dir outputs]
   agentsim tui [runId] [--out-dir outputs]
   pnpm agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
+  pnpm agentsim dashboard [runId] [--out-dir outputs]
   pnpm agentsim tui [runId] [--out-dir outputs]
   pnpm demo "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
 `);

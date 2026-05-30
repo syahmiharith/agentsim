@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-type InspectorTab = "summary" | "artifacts" | "events" | "decisions" | "approvals";
+type DashboardTab = "goal" | "progress" | "agents" | "decisions" | "artifacts" | "review" | "package";
 
 interface ArtifactDebug {
   id: string;
@@ -30,6 +30,12 @@ interface EventDebug {
   agentId?: string;
   artifactId?: string;
   message?: string;
+  data?: {
+    goal?: string;
+    modelMode?: string;
+    provider?: string;
+    finalPackageDir?: string;
+  };
 }
 
 interface DecisionDebug {
@@ -48,6 +54,9 @@ interface ApprovalDebug {
 
 export interface RunDebugModel {
   runId: string;
+  goal?: string;
+  modelMode?: string;
+  provider?: string;
   runRoot: string;
   finalPackageDir: string;
   artifacts: ArtifactDebug[];
@@ -62,15 +71,15 @@ export interface RunInspectorOptions {
   runId?: string;
 }
 
-export async function startRunInspector(options: RunInspectorOptions): Promise<void> {
+export async function startDashboard(options: RunInspectorOptions): Promise<void> {
   const model = await loadRunDebugModel(options);
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stdout.write(renderRunDebugScreen(model, "summary", 0, 100, 30));
+    process.stdout.write(renderDashboardScreen(model, "goal", 0, 100, 34));
     return;
   }
 
-  await runInteractiveInspector(model);
+  await runInteractiveDashboard(model);
 }
 
 export async function loadRunDebugModel(options: RunInspectorOptions): Promise<RunDebugModel> {
@@ -89,13 +98,18 @@ export async function loadRunDebugModel(options: RunInspectorOptions): Promise<R
   const artifactLineage = await readJsonFile<{ artifacts?: RawArtifactDebug[] }>(join(traceDir, "artifact-lineage.json"), { artifacts: [] });
   const decisions = await readJsonFile<{ decisions?: DecisionDebug[] }>(join(traceDir, "decisions.json"), { decisions: [] });
   const approvals = await readJsonFile<{ approvals?: ApprovalDebug[] }>(join(traceDir, "approvals.json"), { approvals: [] });
+  const events = await readEvents(join(traceDir, "events.jsonl"));
+  const runStarted = events.find((event) => event.name === "run.started");
 
   return {
     runId,
+    goal: runStarted?.data?.goal,
+    modelMode: runStarted?.data?.modelMode,
+    provider: runStarted?.data?.provider,
     runRoot,
     finalPackageDir,
     artifacts: (artifactLineage.artifacts ?? []).map(normalizeArtifact),
-    events: await readEvents(join(traceDir, "events.jsonl")),
+    events,
     decisions: decisions.decisions ?? [],
     approvals: approvals.approvals ?? [],
     files: await listFiles(finalPackageDir)
@@ -116,18 +130,18 @@ function normalizeArtifact(artifact: RawArtifactDebug): ArtifactDebug {
   };
 }
 
-export function renderRunDebugScreen(
+export function renderDashboardScreen(
   model: RunDebugModel,
-  tab: InspectorTab,
+  tab: DashboardTab,
   selectedIndex: number,
   width = 100,
-  height = 30
+  height = 34
 ): string {
-  const tabs: InspectorTab[] = ["summary", "artifacts", "events", "decisions", "approvals"];
+  const tabs: DashboardTab[] = ["goal", "progress", "agents", "decisions", "artifacts", "review", "package"];
   const header = [
-    "Agentsim Debug TUI",
+    "Agentsim TUI Dashboard",
     `Run: ${model.runId}`,
-    `Package: ${model.finalPackageDir}`,
+    `Goal: ${model.goal ?? "unknown goal"}`,
     "",
     tabs.map((candidate) => candidate === tab ? `[${candidate}]` : ` ${candidate} `).join("  "),
     ""
@@ -136,21 +150,22 @@ export function renderRunDebugScreen(
   const body = renderTab(model, tab, selectedIndex);
   const footer = [
     "",
-    "Keys: left/right switch tabs, up/down move, q quit"
+    "Keys: left/right switch views, up/down move, q quit",
+    "Director flow: give goal -> review progress -> inspect decisions -> approve artifacts -> receive package"
   ];
 
   return fitToTerminal([...header, ...body, ...footer], width, height).join("\n") + "\n";
 }
 
-async function runInteractiveInspector(model: RunDebugModel): Promise<void> {
-  const tabs: InspectorTab[] = ["summary", "artifacts", "events", "decisions", "approvals"];
+async function runInteractiveDashboard(model: RunDebugModel): Promise<void> {
+  const tabs: DashboardTab[] = ["goal", "progress", "agents", "decisions", "artifacts", "review", "package"];
   let tabIndex = 0;
   let selectedIndex = 0;
   const stdin = process.stdin;
 
   const render = () => {
     process.stdout.write("\x1b[?25l\x1b[2J\x1b[H");
-    process.stdout.write(renderRunDebugScreen(model, tabs[tabIndex], selectedIndex, process.stdout.columns ?? 100, process.stdout.rows ?? 30));
+    process.stdout.write(renderDashboardScreen(model, tabs[tabIndex], selectedIndex, process.stdout.columns ?? 100, process.stdout.rows ?? 34));
   };
 
   await new Promise<void>((resolve) => {
@@ -187,20 +202,58 @@ async function runInteractiveInspector(model: RunDebugModel): Promise<void> {
   });
 }
 
-function renderTab(model: RunDebugModel, tab: InspectorTab, selectedIndex: number): string[] {
-  if (tab === "summary") {
+function renderTab(model: RunDebugModel, tab: DashboardTab, selectedIndex: number): string[] {
+  if (tab === "goal") {
     const failedEvents = model.events.filter((event) => event.level === "error" || event.name?.includes("failed"));
     return [
-      `Artifacts: ${model.artifacts.length}`,
-      `Events: ${model.events.length}`,
-      `Decisions: ${model.decisions.length}`,
-      `Approvals: ${model.approvals.length}`,
-      `Files: ${model.files.length}`,
+      "Current assignment",
+      `Goal: ${model.goal ?? "unknown goal"}`,
+      `Model mode: ${model.modelMode ?? "unknown"} (${model.provider ?? "unknown provider"})`,
+      `Final package: ${model.finalPackageDir}`,
+      "",
+      "Run health",
+      `Artifacts ready: ${model.artifacts.filter((artifact) => artifact.status === "approved" || artifact.status === "exported").length}/${model.artifacts.length}`,
+      `Decisions recorded: ${model.decisions.length}`,
+      `Approvals recorded: ${model.approvals.length}`,
       `Failures: ${failedEvents.length}`,
       "",
-      "Recent events:",
-      ...model.events.slice(-8).map((event) => formatEvent(event))
+      "How to communicate with the AI agency in this early dashboard:",
+      "- Give a new goal with agentsim run.",
+      "- Inspect agent progress here.",
+      "- Use decisions and approvals as the control points.",
+      "- Use generated artifacts as the shared context, not chat transcripts."
     ];
+  }
+
+  if (tab === "progress") {
+    return [
+      "Workflow progress",
+      ...progressRows(model),
+      "",
+      "Latest agency updates:",
+      ...model.events.slice(-10).map((event) => formatEvent(event))
+    ];
+  }
+
+  if (tab === "agents") {
+    return selectRows(agentRows(model), selectedIndex, (agent, selected) => [
+      `${selected} ${agent.name} | ${agent.status}`,
+      `    latest: ${agent.latestMessage}`,
+      `    artifacts: ${agent.artifacts.join(", ") || "none yet"}`
+    ]);
+  }
+
+  if (tab === "decisions") {
+    const pending = model.approvals.filter((approval) => approval.status === "pending");
+    const rows = [
+      "Director decisions",
+      pending.length === 0 ? "No pending approvals in this run." : `${pending.length} approval(s) need attention.`,
+      ""
+    ];
+    return rows.concat(selectRows(model.decisions, selectedIndex, (decision, selected) => [
+      `${selected} ${decision.title} -> ${decision.selectedOption}`,
+      `    ${decision.rationale ?? decision.id}`
+    ]));
   }
 
   if (tab === "artifacts") {
@@ -210,24 +263,90 @@ function renderTab(model: RunDebugModel, tab: InspectorTab, selectedIndex: numbe
     ]);
   }
 
-  if (tab === "events") {
-    return selectRows(model.events, selectedIndex, (event, selected) => [
-      `${selected} ${formatEvent(event)}`,
-      `    artifact=${event.artifactId ?? "n/a"}`
-    ]);
+  if (tab === "review") {
+    const reviewArtifacts = model.artifacts.filter((artifact) =>
+      artifact.ownerAgentId === "reviewer-qa" || artifact.reviewStatus === "passed" || artifact.reviewStatus === "failed"
+    );
+    return [
+      "Review status",
+      ...reviewSummaryRows(model),
+      ""
+    ].concat(selectRows(reviewArtifacts, selectedIndex, (artifact, selected) => [
+      `${selected} ${artifact.type} | review=${artifact.reviewStatus ?? "n/a"} | approval=${artifact.approvalStatus ?? "n/a"}`,
+      `    ${artifact.finalPackagePath}`
+    ]));
   }
 
-  if (tab === "decisions") {
-    return selectRows(model.decisions, selectedIndex, (decision, selected) => [
-      `${selected} ${decision.title} -> ${decision.selectedOption}`,
-      `    ${decision.rationale ?? decision.id}`
-    ]);
-  }
+  return [
+    "Final package",
+    `Path: ${model.finalPackageDir}`,
+    "",
+    "Package files:"
+  ].concat(selectRows(model.files, selectedIndex, (file, selected) => [
+    `${selected} ${file}`
+  ]));
+}
 
-  return selectRows(model.approvals, selectedIndex, (approval, selected) => [
-    `${selected} ${approval.status} by ${approval.approver}`,
-    `    artifact=${approval.artifactId} approval=${approval.id}`
-  ]);
+function progressRows(model: RunDebugModel): string[] {
+  const stages = [
+    { label: "Client Intake", agents: ["client-intake"] },
+    { label: "Scope / PM", agents: ["scope-pm"] },
+    { label: "Architecture", agents: ["software-architect"] },
+    { label: "Build", agents: ["builder"] },
+    { label: "Review / QA", agents: ["reviewer-qa"] },
+    { label: "Delivery", agents: ["delivery"] }
+  ];
+
+  return stages.map((stage) => {
+    const artifacts = model.artifacts.filter((artifact) => stage.agents.includes(artifact.ownerAgentId));
+    const latestEvent = [...model.events].reverse().find((event) => event.agentId && stage.agents.includes(event.agentId));
+    const status = artifacts.length > 0 ? "complete" : latestEvent ? "active" : "waiting";
+    return `${statusMark(status)} ${stage.label}: ${status} (${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"})`;
+  });
+}
+
+function agentRows(model: RunDebugModel): Array<{ name: string; status: string; latestMessage: string; artifacts: string[] }> {
+  const agents = [
+    { id: "client-intake", name: "Client Intake Agent" },
+    { id: "scope-pm", name: "Scope / PM Agent" },
+    { id: "software-architect", name: "Software Architect Agent" },
+    { id: "builder", name: "Builder Agent" },
+    { id: "reviewer-qa", name: "Reviewer / QA Agent" },
+    { id: "delivery", name: "Delivery Agent" }
+  ];
+
+  return agents.map((agent) => {
+    const artifacts = model.artifacts.filter((artifact) => artifact.ownerAgentId === agent.id);
+    const latestEvent = [...model.events].reverse().find((event) => event.agentId === agent.id);
+    return {
+      name: agent.name,
+      status: artifacts.length > 0 ? "reported" : latestEvent ? "active" : "waiting",
+      latestMessage: latestEvent?.message ?? "No update yet.",
+      artifacts: artifacts.map((artifact) => artifact.type)
+    };
+  });
+}
+
+function reviewSummaryRows(model: RunDebugModel): string[] {
+  const passed = model.artifacts.filter((artifact) => artifact.reviewStatus === "passed").length;
+  const failed = model.artifacts.filter((artifact) => artifact.reviewStatus === "failed").length;
+  const pending = model.artifacts.filter((artifact) => artifact.reviewStatus === "pending").length;
+  return [
+    `Passed: ${passed}`,
+    `Pending: ${pending}`,
+    `Failed: ${failed}`,
+    `Known issue artifact: ${model.artifacts.some((artifact) => artifact.type === "known-issues") ? "present" : "missing"}`
+  ];
+}
+
+function statusMark(status: string): string {
+  if (status === "complete") {
+    return "[done]";
+  }
+  if (status === "active") {
+    return "[active]";
+  }
+  return "[wait]";
 }
 
 function selectRows<T>(items: T[], selectedIndex: number, render: (item: T, selected: string) => string[]): string[] {
@@ -240,7 +359,7 @@ function selectRows<T>(items: T[], selectedIndex: number, render: (item: T, sele
 }
 
 function formatEvent(event: EventDebug): string {
-  return `${event.timestamp ?? "unknown-time"} | ${event.level ?? "info"} | ${event.name ?? "event"} | ${event.agentId ?? "system"} | ${event.message ?? ""}`;
+  return `${event.timestamp ?? "unknown-time"} | ${event.agentId ?? "system"} | ${event.message ?? event.name ?? "event"}`;
 }
 
 function fitToTerminal(lines: string[], width: number, height: number): string[] {

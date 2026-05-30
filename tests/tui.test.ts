@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { MockModelProvider } from "../src/providers/mock-model-provider.js";
-import { loadRunDebugModel, renderRunDebugScreen } from "../src/tui/run-inspector.js";
+import { loadRunDebugModel, renderDashboardScreen } from "../src/tui/run-inspector.js";
 import { runDemo } from "../src/workflow.js";
 
 describe("run inspector TUI", () => {
@@ -21,11 +21,11 @@ describe("run inspector TUI", () => {
     expect(model.artifacts.length).toBeGreaterThan(0);
     expect(model.events.length).toBeGreaterThan(0);
 
-    const screen = renderRunDebugScreen(model, "summary", 0, 100, 30);
-    expect(screen).toContain("Agentsim Debug TUI");
+    const screen = renderDashboardScreen(model, "goal", 0, 100, 34);
+    expect(screen).toContain("Agentsim TUI Dashboard");
     expect(screen).toContain("Run: debug-run");
-    expect(screen).toContain("[summary]");
-    expect(screen).toContain("Artifacts:");
+    expect(screen).toContain("[goal]");
+    expect(screen).toContain("Current assignment");
+    expect(screen).toContain("Director flow");
   });
 });
-
