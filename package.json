@@ -16,10 +16,10 @@
     "eval:mock": "tsx src/evals/run-evals.ts"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^25.9.1",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0",
-    "vitest": "^3.2.0"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   },
   "engines": {
     "node": ">=20.11"
