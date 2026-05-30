@@ -1,0 +1,82 @@
+[
+  {
+    "id": "domain-clinic-privacy-prototype",
+    "suite": "domain",
+    "difficulty": "medium",
+    "prompt": "Build a clinic appointment system for reception staff to schedule patients and track check-ins",
+    "expected": {
+      "appName": "Clinic Appointment Desk",
+      "primaryEntity": "Appointment",
+      "requiredFields": ["patientName", "provider", "visitReason", "appointmentDateTime", "phone"],
+      "requiredStatuses": ["Requested", "Scheduled", "Checked In", "Completed", "Cancelled"],
+      "requiredArtifacts": ["client/project-summary.md", "planning/requirements.md", "technical/architecture.md", "app/src/App.tsx", "review/qa-report.md", "review/known-issues.md", "trace/domain-spec.json", "trace/agent-actions.json", "trace/context-packages.json", "trace/artifact-lineage.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "planning/requirements.md", "terms": ["Clinic Appointment Desk", "Provider", "Appointment date/time"] },
+        { "path": "review/known-issues.md", "terms": ["privacy", "authentication"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["flower company", "supplier", "white roses"] }
+      ]
+    }
+  },
+  {
+    "id": "domain-restaurant-host-stand",
+    "suite": "domain",
+    "difficulty": "medium",
+    "prompt": "Build a restaurant reservation system for host staff to manage requests, confirmations, seating, and cancellations",
+    "expected": {
+      "appName": "Restaurant Reservation Desk",
+      "primaryEntity": "Reservation",
+      "requiredFields": ["guestName", "partySize", "reservationDateTime", "phone", "seatingPreference"],
+      "requiredStatuses": ["Requested", "Confirmed", "Seated", "Completed", "Cancelled"],
+      "requiredArtifacts": ["client/project-summary.md", "planning/requirements.md", "planning/risks.md", "technical/database-schema.md", "app/src/App.tsx", "review/code-review.md", "trace/domain-spec.json", "trace/decisions.json", "trace/approvals.json", "trace/artifact-lineage.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Restaurant Reservation Desk", "reservationDateTime", "Seated"] },
+        { "path": "planning/risks.md", "terms": ["Table capacity", "notifications"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Clinic Appointment Desk", "patientName", "provider"] }
+      ]
+    }
+  },
+  {
+    "id": "domain-equipment-overdue-review",
+    "suite": "domain",
+    "difficulty": "medium",
+    "prompt": "Build an equipment checkout system for a university club where officers approve requests and track overdue items",
+    "expected": {
+      "appName": "Club Equipment Checkout",
+      "primaryEntity": "Checkout",
+      "requiredFields": ["memberName", "equipmentItem", "checkoutDate", "dueDate", "condition"],
+      "requiredStatuses": ["Requested", "Approved", "Checked Out", "Returned", "Overdue", "Rejected"],
+      "requiredArtifacts": ["client/project-summary.md", "planning/requirements.md", "planning/task-breakdown.md", "technical/api-plan.md", "app/src/App.tsx", "review/qa-report.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/agent-messages.json", "trace/artifact-lineage.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Club Equipment Checkout", "equipmentItem", "Overdue"] },
+        { "path": "planning/requirements.md", "terms": ["Approve checkout request", "Filter overdue"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["guestName", "partySize", "seatingPreference"] }
+      ]
+    }
+  },
+  {
+    "id": "domain-crm-pipeline",
+    "suite": "domain",
+    "difficulty": "medium",
+    "prompt": "Build a small CRM for a solo consultant to qualify leads, track proposal status, and record deal outcomes",
+    "expected": {
+      "appName": "Small CRM Desk",
+      "primaryEntity": "Lead",
+      "requiredFields": ["companyName", "contactName", "email", "source"],
+      "requiredStatuses": ["New", "Contacted", "Qualified", "Proposal Sent", "Won", "Lost"],
+      "requiredArtifacts": ["client/project-summary.md", "planning/requirements.md", "planning/scope.md", "technical/architecture.md", "app/src/App.tsx", "review/known-issues.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/agent-actions.json", "trace/artifact-lineage.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Small CRM Desk", "companyName", "Proposal Sent"] },
+        { "path": "planning/scope.md", "terms": ["email integration", "activity history"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["studentId", "appointmentDateTime", "checkoutDate"] }
+      ]
+    }
+  }
+]

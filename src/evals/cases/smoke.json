@@ -1,0 +1,156 @@
+[
+  {
+    "id": "smoke-flower-inventory",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build an inventory request system for a flower company",
+    "expected": {
+      "appName": "Inventory Request Desk",
+      "primaryEntity": "Inventory Request",
+      "requiredFields": ["itemName", "quantity", "requester", "priority"],
+      "requiredStatuses": ["Pending", "Approved", "Ordered", "Fulfilled", "Rejected"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "planning/requirements.md", "review/qa-report.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/artifact-lineage.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Inventory Request Desk", "itemName", "Pending"] },
+        { "path": "planning/requirements.md", "terms": ["inventory request", "Item name"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Barber Booking Desk", "Clinic Appointment Desk"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-barber-booking",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a booking system for a barber shop",
+    "expected": {
+      "appName": "Barber Booking Desk",
+      "primaryEntity": "Booking",
+      "requiredFields": ["customerName", "service", "barber", "appointmentDateTime", "phone"],
+      "requiredStatuses": ["Requested", "Confirmed", "Checked In", "Completed", "Cancelled"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Barber Booking Desk", "appointmentDateTime", "Confirmed"] },
+        { "path": "planning/requirements.md", "terms": ["Service", "Appointment date/time"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["flower company", "white roses", "supplier"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-clinic-appointment",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a clinic appointment system",
+    "expected": {
+      "appName": "Clinic Appointment Desk",
+      "primaryEntity": "Appointment",
+      "requiredFields": ["patientName", "provider", "visitReason", "appointmentDateTime", "phone"],
+      "requiredStatuses": ["Requested", "Scheduled", "Checked In", "Completed", "Cancelled"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Clinic Appointment Desk", "patientName", "Scheduled"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Barber Booking Desk", "Restaurant Reservation Desk"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-restaurant-reservation",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a restaurant reservation system",
+    "expected": {
+      "appName": "Restaurant Reservation Desk",
+      "primaryEntity": "Reservation",
+      "requiredFields": ["guestName", "partySize", "reservationDateTime", "phone", "seatingPreference"],
+      "requiredStatuses": ["Requested", "Confirmed", "Seated", "Completed", "Cancelled"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Restaurant Reservation Desk", "partySize", "Seated"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Clinic Appointment Desk", "Club Equipment Checkout"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-equipment-checkout",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build an equipment checkout system for a university club",
+    "expected": {
+      "appName": "Club Equipment Checkout",
+      "primaryEntity": "Checkout",
+      "requiredFields": ["memberName", "equipmentItem", "checkoutDate", "dueDate", "condition"],
+      "requiredStatuses": ["Requested", "Approved", "Checked Out", "Returned", "Overdue", "Rejected"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "review/code-review.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Club Equipment Checkout", "equipmentItem", "Overdue"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Restaurant Reservation Desk", "Inventory Request Desk"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-small-crm",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a small CRM for a solo consultant",
+    "expected": {
+      "appName": "Small CRM Desk",
+      "primaryEntity": "Lead",
+      "requiredFields": ["companyName", "contactName", "email", "source"],
+      "requiredStatuses": ["New", "Contacted", "Qualified", "Proposal Sent", "Won", "Lost"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Small CRM Desk", "companyName", "Qualified"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Inventory Request Desk", "Student Portal Desk"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-student-request-portal",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a student request portal for a department office",
+    "expected": {
+      "appName": "Student Portal Desk",
+      "primaryEntity": "Student Request",
+      "requiredFields": ["studentName", "studentId", "requestType"],
+      "requiredStatuses": ["Submitted", "In Review", "Waiting on Student", "Resolved", "Rejected"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Student Portal Desk", "studentId", "Waiting on Student"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Small CRM Desk", "Barber Booking Desk"] }
+      ]
+    }
+  },
+  {
+    "id": "smoke-design-studio-content",
+    "suite": "smoke",
+    "difficulty": "smoke",
+    "prompt": "Build a landing page content workflow for a design studio",
+    "expected": {
+      "appName": "Local Business Landing Desk",
+      "primaryEntity": "Content Request",
+      "requiredFields": ["businessName", "section", "headline", "owner"],
+      "requiredStatuses": ["Draft", "In Review", "Approved", "Published Copy", "Rejected"],
+      "requiredArtifacts": ["app/package.json", "app/src/App.tsx", "app/README.md", "planning/requirements.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      "requiredPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Local Business Landing Desk", "businessName", "Published Copy"] }
+      ],
+      "forbiddenPhrases": [
+        { "path": "app/src/App.tsx", "terms": ["Inventory Request Desk", "Club Equipment Checkout"] }
+      ]
+    }
+  }
+]

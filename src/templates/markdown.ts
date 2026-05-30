@@ -66,6 +66,10 @@ export function requirements(spec: DomainSpec): string {
 
 ${spec.sourceGoal}
 
+## App
+
+${spec.appName} is the local prototype package for the ${spec.domain} workflow.
+
 ## Functional Requirements
 
 ${bulletList([

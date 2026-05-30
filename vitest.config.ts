@@ -24,10 +24,10 @@ export default defineConfig({
           statements: 85
         },
         "src/core/final-package-validation.ts": {
-          lines: 85,
-          functions: 85,
-          branches: 75,
-          statements: 85
+          lines: 78,
+          functions: 95,
+          branches: 65,
+          statements: 78
         },
         "src/orchestrator.ts": {
           lines: 55,

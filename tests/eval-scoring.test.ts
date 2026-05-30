@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
+import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { scoreEvalRun, summarizeEvalResults } from "../src/evals/scoring.js";
-import type { RunDemoResult } from "../src/orchestrator.js";
 import type { DomainSpec } from "../src/domain/domain-spec.js";
+import type { RunDemoResult } from "../src/orchestrator.js";
 
 describe("eval scoring", () => {
   it("passes when app, trace, context, and docs match the domain spec", async () => {
@@ -27,7 +28,7 @@ describe("eval scoring", () => {
     expect(result.durationMs).toBe(123);
     expect(result.failureCategory).toBe("none");
     expect(result.failures).toEqual([]);
-    expect(summarizeEvalResults([result])).toEqual({ total: 1, passed: 1, failed: 0 });
+    expect(summarizeEvalResults([result])).toMatchObject({ total: 1, passed: 1, failed: 0, acceptedRuns: 1 });
   });
 
   it("fails when the trace domain spec drifts from the generated domain", async () => {
@@ -37,7 +38,11 @@ describe("eval scoring", () => {
 
     expect(result.domainSpecPresent).toBe(true);
     expect(result.failureCategory).toBe("domain_mismatch");
-    expect(result.failures).toContain("Trace domain spec appName Client Request Tracker does not match Inventory Request Desk");
+    expect(result.failures).toContainEqual(expect.objectContaining({
+      code: "domain_app_name_mismatch",
+      actual: "Client Request Tracker",
+      expected: "Inventory Request Desk"
+    }));
   });
 
   it("fails when required trace files are missing", async () => {
@@ -50,8 +55,8 @@ describe("eval scoring", () => {
     expect(result.contextProvenanceOk).toBe(false);
     expect(result.failureCategory).toBe("missing_trace_file");
     expect(result.failures).toEqual(expect.arrayContaining([
-      "Missing trace file: trace/context-eval.json",
-      "Missing context evaluation"
+      expect.objectContaining({ code: "trace_file_missing", path: "trace/context-eval.json" }),
+      expect.objectContaining({ code: "context_eval_missing", path: "trace/context-eval.json" })
     ]));
   });
 
@@ -76,9 +81,9 @@ describe("eval scoring", () => {
     expect(result.contextProvenanceOk).toBe(false);
     expect(result.failureCategory).toBe("context");
     expect(result.failures).toEqual(expect.arrayContaining([
-      "Context evaluation reports incomplete required coverage",
-      "Context evaluation reports incomplete provenance",
-      "Context evaluation failure: action context hash mismatch"
+      expect.objectContaining({ code: "context_coverage_failed" }),
+      expect.objectContaining({ code: "context_provenance_failed" }),
+      expect.objectContaining({ code: "context_eval_failure", message: "Context evaluation failure: action context hash mismatch" })
     ]));
   });
 
@@ -97,8 +102,8 @@ describe("eval scoring", () => {
     expect(result.requiredFieldsAppearInApp).toBe(false);
     expect(result.failureCategory).toBe("domain_mismatch");
     expect(result.failures).toEqual(expect.arrayContaining([
-      "App source does not contain every workflow status",
-      "App source does not contain every required field"
+      expect.objectContaining({ code: "workflow_statuses_missing" }),
+      expect.objectContaining({ code: "required_fields_missing" })
     ]));
   });
 
@@ -110,7 +115,7 @@ describe("eval scoring", () => {
 
     expect(result.templateLeakageDetected).toBe(true);
     expect(result.failureCategory).toBe("runtime");
-    expect(result.failures).toContain("Generated package contains stale generic or template placeholder text");
+    expect(result.failures).toContainEqual(expect.objectContaining({ code: "template_text_leaked" }));
   });
 });
 
@@ -127,18 +132,13 @@ async function createEvalFixture(
   const finalPackageDir = join(tmpdir(), `agentsim-eval-score-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const appSource = options.appSource ?? renderAppSource(spec);
   const appReadme = options.appReadme ?? `# ${spec.appName}\n\nManage ${spec.primaryEntity.pluralName}.`;
-  const traceFiles = new Set(options.omitTraceFiles ?? []);
-  await writeFixtureFile(finalPackageDir, "app/package.json", JSON.stringify({ name: spec.appSlug }, null, 2));
-  await writeFixtureFile(finalPackageDir, "app/src/App.tsx", appSource);
-  await writeFixtureFile(finalPackageDir, "app/server.js", "export {};\n");
-  await writeFixtureFile(finalPackageDir, "app/README.md", appReadme);
-  await writeFixtureFile(finalPackageDir, "planning/requirements.md", `# Requirements\n\n${spec.appName} manages ${spec.primaryEntity.pluralName}.\n`);
-  await writeFixtureFile(finalPackageDir, "client/project-summary.md", `# Project Summary\n\n${spec.appName} centers on ${spec.primaryEntity.name}.\n`);
+  const omittedTraceFiles = new Set(options.omitTraceFiles ?? []);
+  await writeRequiredFinalPackageFiles(finalPackageDir, spec, appSource, appReadme);
 
-  if (!traceFiles.has("domain-spec.json")) {
+  if (!omittedTraceFiles.has("domain-spec.json")) {
     await writeFixtureFile(finalPackageDir, "trace/domain-spec.json", JSON.stringify(options.traceDomainSpec ?? spec, null, 2));
   }
-  if (!traceFiles.has("context-eval.json")) {
+  if (!omittedTraceFiles.has("context-eval.json")) {
     await writeFixtureFile(finalPackageDir, "trace/context-eval.json", JSON.stringify({
       evaluation: options.contextEvaluation ?? {
         runId: "run",
@@ -154,7 +154,7 @@ async function createEvalFixture(
       }
     }, null, 2));
   }
-  if (!traceFiles.has("run-summary.json")) {
+  if (!omittedTraceFiles.has("run-summary.json")) {
     await writeFixtureFile(finalPackageDir, "trace/run-summary.json", JSON.stringify({
       runId: "run",
       goal: spec.sourceGoal,
@@ -167,6 +167,7 @@ async function createEvalFixture(
       failures: []
     }, null, 2));
   }
+  await writeOtherTraceFiles(finalPackageDir, omittedTraceFiles);
 
   return {
     taskRun: {
@@ -182,6 +183,69 @@ async function createEvalFixture(
     decisions: [],
     domainSpec: spec
   };
+}
+
+async function writeRequiredFinalPackageFiles(finalPackageDir: string, spec: DomainSpec, appSource: string, appReadme: string): Promise<void> {
+  for (const relativePath of softwareFreelancePack.requiredFinalPackageFiles) {
+    await writeFixtureFile(finalPackageDir, relativePath, requiredFileContent(relativePath, spec, appSource, appReadme));
+  }
+}
+
+function requiredFileContent(relativePath: string, spec: DomainSpec, appSource: string, appReadme: string): string {
+  switch (relativePath) {
+    case "app/package.json":
+      return JSON.stringify({ name: spec.appSlug, scripts: { build: "echo build-ok" } }, null, 2);
+    case "app/src/App.tsx":
+      return appSource;
+    case "app/server.js":
+      return "export {};\n";
+    case "app/README.md":
+      return appReadme;
+    case "app/index.html":
+      return `<div id="root">${spec.appName}</div>\n`;
+    case "app/src/main.tsx":
+      return `import "./App";\n`;
+    case "app/src/styles.css":
+      return ":root { color-scheme: light; }\n";
+    default:
+      return `# ${relativePath}\n\n${spec.appName} supports ${spec.primaryEntity.name} workflows for ${spec.primaryEntity.pluralName}.\n`;
+  }
+}
+
+async function writeOtherTraceFiles(finalPackageDir: string, omittedFileNames: Set<string>): Promise<void> {
+  for (const relativePath of softwareFreelancePack.requiredTraceFiles) {
+    const fileName = relativePath.replace(/^trace\//, "");
+    if (omittedFileNames.has(fileName) || fileName === "domain-spec.json" || fileName === "context-eval.json") {
+      continue;
+    }
+    await writeFixtureFile(finalPackageDir, relativePath, traceFileContent(fileName));
+  }
+}
+
+function traceFileContent(fileName: string): string {
+  if (fileName === "events.jsonl") {
+    return "";
+  }
+  return JSON.stringify(traceFileJson(fileName), null, 2);
+}
+
+function traceFileJson(fileName: string): unknown {
+  switch (fileName) {
+    case "agent-messages.json":
+      return { messages: [] };
+    case "agent-actions.json":
+      return { actions: [] };
+    case "context-packages.json":
+      return { contextPackages: [] };
+    case "approvals.json":
+      return { approvals: [] };
+    case "decisions.json":
+      return { decisions: [] };
+    case "artifact-lineage.json":
+      return { artifacts: [] };
+    default:
+      return {};
+  }
 }
 
 async function writeFixtureFile(root: string, relativePath: string, content: string): Promise<void> {
