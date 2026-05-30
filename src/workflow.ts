@@ -2,8 +2,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { FileArtifactStore } from "./core/artifacts.js";
 import { JsonlEventStore } from "./core/events.js";
+import { validateFinalPackage } from "./core/final-package-validation.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
-import { inferDomainSpec } from "./domain/mock-domain-spec.js";
+import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
 import { getAgent } from "./agents/agents.js";
 import {
   apiPlan,
@@ -11,7 +12,7 @@ import {
   assumptions,
   codeReview,
   databaseSchema,
-  handoffGuide,
+  handoffNotes,
   knownIssues,
   projectSummary,
   proposal,
@@ -20,11 +21,12 @@ import {
   risks,
   scope,
   taskBreakdown,
-  timeline
+  timeline,
+  userGuide
 } from "./templates/markdown.js";
 import { writeGeneratedApp } from "./templates/app.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
-import type { Approval, Artifact, Decision, ModelProvider, TaskRun } from "./types.js";
+import type { Approval, Artifact, Decision, ModelProvider, RunSummary, TaskRun } from "./types.js";
 
 export interface RunDemoOptions {
   goal: string;
@@ -49,12 +51,13 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
   const eventStore = new JsonlEventStore(runId, join(workspace.finalPackageDir, "trace", "events.jsonl"));
   const artifactStore = new FileArtifactStore(workspace);
   const decisions: Decision[] = [];
-  const domainSpec = inferDomainSpec(options.goal);
+  const domainPack = softwareFreelancePack;
+  const domainSpec = domainPack.inferDomainSpec(options.goal);
   const taskRun: TaskRun = {
     id: runId,
     goal: options.goal,
     startedAt: new Date().toISOString(),
-    status: "running",
+    status: "RUNNING",
     modelMode: options.modelProvider.mode,
     outputDir: workspace.rootDir
   };
@@ -64,13 +67,14 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     level: "info",
     name: "run.started",
     message: `Started Agentsim demo run ${runId}.`,
-    data: {
-      goal: options.goal,
-      modelMode: options.modelProvider.mode,
-      provider: options.modelProvider.name,
-      appName: domainSpec.appName,
-      domain: domainSpec.domain,
-      primaryEntity: domainSpec.primaryEntity.name
+      data: {
+        goal: options.goal,
+        modelMode: options.modelProvider.mode,
+        provider: options.modelProvider.name,
+        domainPackId: domainPack.id,
+        appName: domainSpec.appName,
+        domain: domainSpec.domain,
+        primaryEntity: domainSpec.primaryEntity.name
     }
   });
 
@@ -321,16 +325,27 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       inputArtifactIds: [qaArtifact.id, codeReviewArtifact.id],
       reviewStatus: appValidationFailed ? "failed" : "passed"
     });
-    const handoffArtifact = await createArtifact({
+    const handoffNotesArtifact = await createArtifact({
       artifactStore,
       eventStore,
       goal: options.goal,
-      type: "handoff-guide",
+      type: "handoff-notes",
       ownerAgentId: "delivery",
-      content: handoffGuide(domainSpec),
-      workspaceRelativePath: "artifacts/client/handoff-guide.md",
-      finalPackagePath: "client/handoff-guide.md",
+      content: handoffNotes(domainSpec),
+      workspaceRelativePath: "artifacts/client/handoff-notes.md",
+      finalPackagePath: "client/handoff-notes.md",
       inputArtifactIds: [qaArtifact.id, knownIssuesArtifact.id, risksArtifact.id]
+    });
+    await createArtifact({
+      artifactStore,
+      eventStore,
+      goal: options.goal,
+      type: "user-guide",
+      ownerAgentId: "delivery",
+      content: userGuide(domainSpec),
+      workspaceRelativePath: "artifacts/client/user-guide.md",
+      finalPackagePath: "client/user-guide.md",
+      inputArtifactIds: [summaryArtifact.id, appArtifact.id, handoffNotesArtifact.id]
     });
 
     for (const artifact of artifactStore.list()) {
@@ -368,14 +383,57 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     await writeFile(join(workspace.finalPackageDir, "trace", "approvals.json"), JSON.stringify({ approvals }, null, 2), "utf8");
     await artifactStore.exportLineage(join(workspace.finalPackageDir, "trace", "artifact-lineage.json"));
 
-    taskRun.status = "completed";
+    const validationResult = await validateFinalPackage({
+      finalPackageDir: workspace.finalPackageDir,
+      artifacts: artifactStore.list(),
+      domainPack
+    });
+
+    if (!validationResult.ok) {
+      taskRun.status = "REVIEW_FAILED";
+      taskRun.failureReason = "VALIDATION_FAILED";
+      taskRun.completedAt = new Date().toISOString();
+      await writeRunSummary({
+        runId,
+        goal: options.goal,
+        status: taskRun.status,
+        modelMode: taskRun.modelMode,
+        provider: options.modelProvider.name,
+        finalPackageDir: workspace.finalPackageDir,
+        artifactCount: artifactStore.list().length,
+        validationResult,
+        failures: validationResult.failures
+      }, workspace.finalPackageDir);
+      await eventStore.append({
+        runId,
+        level: "error",
+        name: "run.validation_failed",
+        agentId: "reviewer-qa",
+        message: "Final package validation failed.",
+        data: { failures: validationResult.failures }
+      });
+      throw new Error(`Final package validation failed: ${validationResult.failures.join("; ")}`);
+    }
+
+    taskRun.status = "COMPLETED";
     taskRun.completedAt = new Date().toISOString();
+    await writeRunSummary({
+      runId,
+      goal: options.goal,
+      status: taskRun.status,
+      modelMode: taskRun.modelMode,
+      provider: options.modelProvider.name,
+      finalPackageDir: workspace.finalPackageDir,
+      artifactCount: artifactStore.list().length,
+      validationResult,
+      failures: []
+    }, workspace.finalPackageDir);
     await eventStore.append({
       runId,
       level: "info",
       name: "run.completed",
       agentId: "delivery",
-      artifactId: handoffArtifact.id,
+      artifactId: handoffNotesArtifact.id,
       message: "Completed Agentsim demo run.",
       data: { finalPackageDir: workspace.finalPackageDir }
     });
@@ -388,7 +446,10 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       domainSpec
     };
   } catch (error) {
-    taskRun.status = "failed";
+    if (taskRun.status !== "REVIEW_FAILED") {
+      taskRun.status = "FAILED";
+      taskRun.failureReason = "UNKNOWN";
+    }
     taskRun.completedAt = new Date().toISOString();
     await eventStore.append({
       runId,
@@ -398,6 +459,10 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     });
     throw error;
   }
+}
+
+async function writeRunSummary(summary: RunSummary, finalPackageDir: string): Promise<void> {
+  await writeFile(join(finalPackageDir, "trace", "run-summary.json"), JSON.stringify(summary, null, 2), "utf8");
 }
 
 async function createArtifact(input: {

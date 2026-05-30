@@ -42,6 +42,14 @@ body:
       description: What durable artifact, review loop, decision record, approval, or trace output improves?
     validations:
       required: true
+  - type: textarea
+    id: scope-fit
+    attributes:
+      label: Why this fits Agentsim's scope
+      description: Explain why this belongs in the current software-freelance workflow instead of a broader platform feature.
+      placeholder: This improves final-package review quality for the CLI demo without requiring a dashboard or agent marketplace.
+    validations:
+      required: true
   - type: checkboxes
     id: guardrails
     attributes:

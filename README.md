@@ -1,5 +1,9 @@
 # Agentsim
 
+[![CI](https://github.com/syahmiharith/agentsim/actions/workflows/ci.yml/badge.svg)](https://github.com/syahmiharith/agentsim/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/syahmiharith/agentsim/actions/workflows/codeql.yml/badge.svg)](https://github.com/syahmiharith/agentsim/actions/workflows/codeql.yml)
+[![DCO](https://github.com/syahmiharith/agentsim/actions/workflows/dco.yml/badge.svg)](https://github.com/syahmiharith/agentsim/actions/workflows/dco.yml)
+
 Agentsim is an open-source tool for turning vague software requests into structured delivery packages.
 
 It is designed for solo software freelancers who need help with planning, building, reviewing, and handing off client work.
@@ -17,6 +21,25 @@ Agentsim focuses on durable project artifacts rather than chat transcripts.
 ```text
 Goal -> Plan -> Decisions -> Artifacts -> Review -> Final package
 ```
+
+## Project Status
+
+Agentsim is alpha, pre-1.0 software. The current repo is a CLI proof of concept for one narrow software-freelance workflow, not a general-purpose agent platform or production delivery system.
+
+Current capability:
+
+* run a local CLI workflow from a high-level client request
+* generate planning, technical, review, client handoff, trace, and app prototype files
+* run in deterministic mock mode without provider keys
+* use an OpenAI-compatible provider in live mode when configured
+* run a deterministic eval harness across the first software-freelance cases
+
+Current limitations:
+
+* generated apps are simple prototypes and still need human review before client delivery
+* the workflow is tuned for the first software-freelance demo, not arbitrary domains
+* approvals, eval scoring, workspace execution, and provider routing are still early
+* no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
 
@@ -78,6 +101,13 @@ outputs/{runId}/final-package/
 ```
 
 The v0 demo is intentionally small. It validates the core workflow before the project expands.
+
+For the flower-company inventory example, a useful run should produce artifacts such as:
+
+* `planning/requirements.md` describing request creation, list viewing, status updates, and admin needs
+* `technical/architecture.md` explaining the simple local app structure and data model
+* `review/qa-report.md` checking whether the generated package matches the scoped requirements
+* `trace/events.jsonl` showing the workflow events that led to the final package
 
 ## Design Principles
 
@@ -143,12 +173,21 @@ pnpm demo "Build an inventory request system for a flower company" --live
 
 If no live key is configured and `--live` is not passed, Agentsim falls back to mock mode.
 
+Run the software-freelance eval harness:
+
+```bash
+pnpm eval
+```
+
+This writes per-case final packages, scorecards, one-shot baselines, and an aggregate report under `outputs/evals/{evalRunId}`.
+
 ## Development
 
 ```bash
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm eval
 ```
 
 Useful entry points:
@@ -189,6 +228,13 @@ The current implementation is deliberately thin. The priority is to make the sof
 ## Contributing
 
 The best contributions right now improve the current vertical slice instead of widening the platform too early.
+
+Who should contribute:
+
+* developers interested in practical CLI tools and local-first workflows
+* people who care about artifact quality, review loops, and traceability
+* freelancers or technical reviewers who can identify gaps in handoff packages
+* contributors willing to keep changes small, testable, and aligned with the current scope
 
 High-impact areas:
 

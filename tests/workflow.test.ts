@@ -15,13 +15,14 @@ describe("demo workflow", () => {
       modelProvider: new MockModelProvider()
     });
 
-    expect(result.taskRun.status).toBe("completed");
+    expect(result.taskRun.status).toBe("COMPLETED");
     expect(result.artifacts.length).toBeGreaterThanOrEqual(15);
 
     const required = [
       "client/proposal.md",
       "client/project-summary.md",
-      "client/handoff-guide.md",
+      "client/handoff-notes.md",
+      "client/user-guide.md",
       "planning/requirements.md",
       "planning/scope.md",
       "planning/assumptions.md",
@@ -42,7 +43,8 @@ describe("demo workflow", () => {
       "trace/approvals.json",
       "trace/decisions.json",
       "trace/domain-spec.json",
-      "trace/artifact-lineage.json"
+      "trace/artifact-lineage.json",
+      "trace/run-summary.json"
     ];
 
     for (const relativePath of required) {
@@ -61,6 +63,11 @@ describe("demo workflow", () => {
 
     const domainSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-spec.json"), "utf8"));
     expect(domainSpec.appName).toBe("Inventory Request Desk");
+
+    const runSummary = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "run-summary.json"), "utf8"));
+    expect(runSummary.status).toBe("COMPLETED");
+    expect(runSummary.validationResult.ok).toBe(true);
+    expect(runSummary.artifactCount).toBe(result.artifacts.length);
   });
 
   it("creates prompt-specific docs and app files for a barber booking prompt", async () => {

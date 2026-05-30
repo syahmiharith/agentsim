@@ -2,6 +2,14 @@
 
 Describe what changed and why.
 
+## Why this fits Agentsim
+
+Explain how this supports artifact-first software delivery, traceability, review quality, approvals, or final handoff quality.
+
+## Files / areas changed
+
+List the main files, packages, templates, generated artifacts, or workflows touched.
+
 ## Type of change
 
 - [ ] Core contracts
@@ -36,10 +44,11 @@ pnpm demo "Build an inventory request system for a flower company" --mock
 
 List any generated package files, trace files, artifact lineage, decisions, or approvals affected by this change.
 
-## Risks and follow-up
+## Risks / regressions
 
-Call out known limitations, migration notes, or follow-up work.
+Call out known limitations, possible regressions, migration notes, or follow-up work.
 
 ## DCO
 
 - [ ] My commits are signed off with `git commit -s`
+- [ ] I checked that each commit includes a `Signed-off-by:` line

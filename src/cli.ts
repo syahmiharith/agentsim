@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Command } from "commander";
+import { z } from "zod";
 import { loadDotEnv } from "./config.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
 import { startDashboard } from "./tui/run-inspector.js";
@@ -16,9 +18,26 @@ interface CliOptions {
   runId?: string;
 }
 
+const cliOptionsSchema = z.object({
+  command: z.enum(["run", "demo", "dashboard", "tui"]).optional(),
+  goal: z.string().trim().min(1).optional(),
+  providerSelection: z.enum(["auto", "mock", "live"]),
+  outputRoot: z.string().trim().min(1),
+  runId: z.string().trim().min(1).optional()
+});
+
 export async function main(argv: string[]): Promise<void> {
   loadDotEnv();
-  const options = parseArgs(argv);
+  let options: CliOptions;
+
+  try {
+    options = parseArgs(argv);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    printUsage();
+    process.exitCode = 1;
+    return;
+  }
 
   if (!isSupportedCommand(options.command)) {
     printUsage();
@@ -55,46 +74,77 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 export function parseArgs(argv: string[]): CliOptions {
-  const [command, ...rest] = argv;
-  const goalParts: string[] = [];
-  let providerSelection: ProviderSelection = "auto";
-  let outputRoot = "outputs";
-  let runId: string | undefined;
-
-  for (let index = 0; index < rest.length; index += 1) {
-    const arg = rest[index];
-    if (arg === "--mock") {
-      providerSelection = "mock";
-      continue;
-    }
-    if (arg === "--live") {
-      providerSelection = "live";
-      continue;
-    }
-    if (arg === "--out-dir") {
-      outputRoot = rest[index + 1] ?? outputRoot;
-      index += 1;
-      continue;
-    }
-    if (arg === "--run-id") {
-      runId = rest[index + 1];
-      index += 1;
-      continue;
-    }
-    goalParts.push(arg);
-  }
-
-  return {
-    command,
-    goal: goalParts.join(" ").trim() || undefined,
-    providerSelection,
-    outputRoot,
-    runId
+  let parsed: CliOptions = {
+    providerSelection: "auto",
+    outputRoot: "outputs"
   };
+
+  const program = new Command();
+  program
+    .name("agentsim")
+    .exitOverride()
+    .allowExcessArguments(false)
+    .configureOutput({
+      writeOut: () => undefined,
+      writeErr: () => undefined
+    });
+
+  addRunCommand(program, "run", (options) => {
+    parsed = options;
+  });
+  addRunCommand(program, "demo", (options) => {
+    parsed = options;
+  });
+  addDashboardCommand(program, "dashboard", (options) => {
+    parsed = options;
+  });
+  addDashboardCommand(program, "tui", (options) => {
+    parsed = options;
+  });
+
+  program.parse(["node", "agentsim", ...argv], { from: "node" });
+  return cliOptionsSchema.parse(parsed);
 }
 
 function isSupportedCommand(command: string | undefined): command is CliCommand {
   return command === "run" || command === "demo" || command === "dashboard" || command === "tui";
+}
+
+function addRunCommand(program: Command, name: "run" | "demo", onParse: (options: CliOptions) => void): void {
+  program
+    .command(name)
+    .argument("[goal...]", "client software goal")
+    .option("--mock", "use deterministic mock model mode")
+    .option("--live", "require configured live model mode")
+    .option("--out-dir <dir>", "output root directory", "outputs")
+    .option("--run-id <id>", "stable run id")
+    .action((goalParts: string[], flags: { mock?: boolean; live?: boolean; outDir: string; runId?: string }) => {
+      if (flags.mock && flags.live) {
+        throw new Error("Choose only one provider mode: --mock or --live.");
+      }
+      onParse({
+        command: name,
+        goal: goalParts.join(" ").trim() || undefined,
+        providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
+        outputRoot: flags.outDir,
+        runId: flags.runId
+      });
+    });
+}
+
+function addDashboardCommand(program: Command, name: "dashboard" | "tui", onParse: (options: CliOptions) => void): void {
+  program
+    .command(name)
+    .argument("[runId]", "run id to inspect")
+    .option("--out-dir <dir>", "output root directory", "outputs")
+    .action((runId: string | undefined, flags: { outDir: string }) => {
+      onParse({
+        command: name,
+        goal: runId,
+        providerSelection: "auto",
+        outputRoot: flags.outDir
+      });
+    });
 }
 
 function printUsage(): void {

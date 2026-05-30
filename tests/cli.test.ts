@@ -34,4 +34,12 @@ describe("CLI parsing", () => {
     const options = parseArgs(["run", "--mock"]);
     expect(options.goal).toBeUndefined();
   });
+
+  it("rejects mutually exclusive model mode flags", () => {
+    expect(() => parseArgs(["run", "Build", "inventory", "--mock", "--live"])).toThrow("--mock or --live");
+  });
+
+  it("rejects unknown flags", () => {
+    expect(() => parseArgs(["run", "Build", "inventory", "--unknown"])).toThrow();
+  });
 });

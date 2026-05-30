@@ -29,6 +29,7 @@ Current capabilities:
 - Mock and OpenAI-compatible model provider boundary.
 - Artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
+- Deterministic eval harness with software-freelance cases, scorecards, one-shot baselines, and an aggregate report.
 
 The next work should strengthen organizational capability around this spine.
 
@@ -220,4 +221,3 @@ Acceptance:
 - Upgrade through artifact complexity, execution capability, persistence, decision rights, and domain awareness.
 - Keep the user experience centered on: give goal, review plan, approve decisions, inspect artifacts, receive final package, continue project.
 - Avoid turning Agentsim into generic multi-agent chat software.
-

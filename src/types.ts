@@ -1,8 +1,33 @@
-export type ArtifactStatus = "draft" | "reviewed" | "approved" | "exported" | "failed";
+import type { DomainSpec } from "./domain/domain-spec.js";
+
+export type ArtifactStatus = "draft" | "reviewed" | "approved" | "rejected" | "superseded" | "exported" | "failed";
 export type ReviewStatus = "not_required" | "pending" | "passed" | "failed";
 export type ApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
 export type EventLevel = "info" | "warn" | "error";
 export type ModelMode = "mock" | "live";
+
+export type TaskRunStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "PRODUCED_ARTIFACT"
+  | "NEEDS_REVIEW"
+  | "REVIEW_PASSED"
+  | "REVIEW_FAILED"
+  | "WAITING_HUMAN_APPROVAL"
+  | "APPROVED"
+  | "REJECTED"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+export type FailureReason =
+  | "FAILED_MODEL_CALL"
+  | "FAILED_TOOL_CALL"
+  | "FAILED_REVIEW"
+  | "TIMEOUT"
+  | "BUDGET_EXCEEDED"
+  | "VALIDATION_FAILED"
+  | "UNKNOWN";
 
 export type AgentRole =
   | "client-intake"
@@ -28,7 +53,9 @@ export type ArtifactType =
   | "qa-report"
   | "code-review"
   | "known-issues"
-  | "handoff-guide";
+  | "handoff-guide"
+  | "handoff-notes"
+  | "user-guide";
 
 export interface Agent {
   id: AgentRole;
@@ -41,9 +68,24 @@ export interface TaskRun {
   goal: string;
   startedAt: string;
   completedAt?: string;
-  status: "running" | "completed" | "failed";
+  status: TaskRunStatus;
+  failureReason?: FailureReason;
   modelMode: ModelMode;
   outputDir: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+}
+
+export interface Project {
+  id: string;
+  organizationId: string;
+  name: string;
+  goal: string;
+  domainPackId: string;
+  createdAt: string;
 }
 
 export interface Workspace {
@@ -123,10 +165,20 @@ export interface ModelProvider {
   generate(request: ModelRequest): Promise<ModelResponse>;
 }
 
+export interface RunCommandResult {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
 export interface WorkspaceDriver {
   create(runId: string, outputRoot: string): Promise<Workspace>;
   writeFile(workspace: Workspace, relativePath: string, content: string): Promise<string>;
+  readFile(workspace: Workspace, relativePath: string): Promise<string>;
+  listFiles(workspace: Workspace, relativePath?: string): Promise<string[]>;
   copyDirectory(sourceDir: string, targetDir: string): Promise<void>;
+  runCommand?(workspace: Workspace, command: string): Promise<RunCommandResult>;
 }
 
 export interface ArtifactStore {
@@ -152,3 +204,46 @@ export interface CreateArtifactInput {
   prompt?: string;
 }
 
+export interface ArtifactManifestItem {
+  type: ArtifactType;
+  title: string;
+  ownerAgentId: AgentRole;
+  finalPackagePath: string;
+  required: boolean;
+  reviewRequired: boolean;
+}
+
+export interface ReviewRubricCriterion {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface DomainPack {
+  id: string;
+  displayName: string;
+  version: string;
+  agents: Agent[];
+  artifactManifest: ArtifactManifestItem[];
+  requiredFinalPackageFiles: string[];
+  requiredTraceFiles: string[];
+  reviewRubric: ReviewRubricCriterion[];
+  inferDomainSpec(goal: string): DomainSpec;
+}
+
+export interface ValidationResult {
+  ok: boolean;
+  failures: string[];
+}
+
+export interface RunSummary {
+  runId: string;
+  goal: string;
+  status: TaskRunStatus;
+  modelMode: ModelMode;
+  provider: string;
+  finalPackageDir: string;
+  artifactCount: number;
+  validationResult: ValidationResult;
+  failures: string[];
+}

@@ -26,6 +26,14 @@ body:
         3. Inspect outputs/<runId>/final-package/
     validations:
       required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      description: Paste the exact command that showed the problem.
+      placeholder: pnpm demo "Build an inventory request system for a flower company" --mock
+    validations:
+      required: true
   - type: textarea
     id: expected
     attributes:
@@ -38,6 +46,21 @@ body:
     attributes:
       label: Actual behavior
       description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: artifacts-path
+    attributes:
+      label: Logs or artifacts path
+      description: If relevant, include the sanitized outputs/<runId>/ path, trace file, or generated package file.
+      placeholder: outputs/<runId>/final-package/trace/events.jsonl
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
     validations:
       required: true
   - type: input

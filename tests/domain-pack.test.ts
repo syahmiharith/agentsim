@@ -1,0 +1,46 @@
+import { describe, expect, it } from "vitest";
+import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
+
+describe("softwareFreelancePack", () => {
+  it("defines the v0 final-package manifest", () => {
+    expect(softwareFreelancePack.id).toBe("software-freelance");
+    expect(softwareFreelancePack.agents.map((agent) => agent.id)).toEqual([
+      "client-intake",
+      "scope-pm",
+      "software-architect",
+      "builder",
+      "reviewer-qa",
+      "delivery"
+    ]);
+    expect(softwareFreelancePack.requiredFinalPackageFiles).toEqual(expect.arrayContaining([
+      "client/project-summary.md",
+      "client/handoff-notes.md",
+      "client/user-guide.md",
+      "planning/requirements.md",
+      "technical/architecture.md",
+      "review/qa-report.md",
+      "app/package.json",
+      "app/src/App.tsx"
+    ]));
+    expect(softwareFreelancePack.requiredTraceFiles).toEqual(expect.arrayContaining([
+      "trace/events.jsonl",
+      "trace/decisions.json",
+      "trace/approvals.json",
+      "trace/artifact-lineage.json"
+    ]));
+  });
+
+  it.each([
+    ["Build an inventory request system for a flower company", "Inventory Request Desk", "Inventory Request", "Pending"],
+    ["Build a booking system for a barber shop", "Barber Booking Desk", "Booking", "Confirmed"],
+    ["Build a clinic appointment system", "Clinic Appointment Desk", "Appointment", "Scheduled"],
+    ["Build a restaurant reservation system", "Restaurant Reservation Desk", "Reservation", "Seated"],
+    ["Build an equipment checkout system for a university club", "Club Equipment Checkout", "Checkout", "Overdue"]
+  ])("infers distinct software freelance package content for %s", (goal, appName, entityName, status) => {
+    const spec = softwareFreelancePack.inferDomainSpec(goal);
+
+    expect(spec.appName).toBe(appName);
+    expect(spec.primaryEntity.name).toBe(entityName);
+    expect(spec.workflowStatuses).toContain(status);
+  });
+});

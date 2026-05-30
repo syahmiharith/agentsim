@@ -292,6 +292,66 @@ ${validationNote}
 `;
 }
 
+export function handoffNotes(spec: DomainSpec): string {
+  return `# Handoff Notes
+
+## What Was Delivered
+
+A reviewed local MVP package for: ${spec.sourceGoal}
+
+## Package Orientation
+
+- Client summary: \`client/project-summary.md\`
+- User guide: \`client/user-guide.md\`
+- Scope and assumptions: \`planning/scope.md\` and \`planning/assumptions.md\`
+- Technical plan: \`technical/architecture.md\`, \`technical/api-plan.md\`, and \`technical/database-schema.md\`
+- Runnable app: \`app/README.md\`
+- Review notes: \`review/qa-report.md\`, \`review/code-review.md\`, and \`review/known-issues.md\`
+
+## Recommended Next Review Questions
+
+- Are these the right ${spec.primaryEntity.name.toLowerCase()} fields?
+- Are these the right status values?
+- Who should be allowed to update workflow status?
+- Which integration matters most after this local prototype?
+
+## Production Notes
+
+Do not deploy this prototype publicly until authentication, production persistence, backups, and environment-specific configuration are added.
+`;
+}
+
+export function userGuide(spec: DomainSpec): string {
+  return `# User Guide
+
+## Purpose
+
+${spec.appName} helps ${joinHuman(spec.targetUsers)} manage ${spec.primaryEntity.pluralName.toLowerCase()} through a simple local workflow.
+
+## Main Actions
+
+${bulletList(spec.coreActions)}
+
+## How To Use The Prototype
+
+1. Start the API and web app using the commands in \`app/README.md\`.
+2. Open the local Vite URL in a browser.
+3. Use the ${spec.screens[0]?.name ?? `New ${spec.primaryEntity.name}`} form to create ${spec.primaryEntity.pluralName.toLowerCase()}.
+4. Review submitted records in the ${spec.screens[1]?.name ?? `${spec.primaryEntity.name} List`}.
+5. Change status values from the list to simulate the admin workflow.
+
+## Status Values
+
+${bulletList(spec.workflowStatuses)}
+
+## Demo Limitations
+
+- Data is stored locally in the generated app folder.
+- There are no user accounts or permissions yet.
+- Notifications, integrations, and production deployment are outside this MVP.
+`;
+}
+
 export function handoffGuide(spec: DomainSpec): string {
   return `# Handoff Guide
 

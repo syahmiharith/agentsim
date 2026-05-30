@@ -16,7 +16,8 @@ const defaultArtifactTypes = [
   "qa-report",
   "code-review",
   "known-issues",
-  "handoff-guide"
+  "handoff-notes",
+  "user-guide"
 ];
 
 export function inferDomainSpec(goal: string): DomainSpec {
@@ -134,6 +135,116 @@ export function inferDomainSpec(goal: string): DomainSpec {
     });
   }
 
+  if (normalized.includes("student") || normalized.includes("portal")) {
+    return buildSpec({
+      sourceGoal: goal,
+      appName: "Student Portal Desk",
+      appSlug: "student-portal-desk",
+      domain: "student service request",
+      primaryEntity: entity("Student Request", "Student Requests", "requests", [
+        field("studentName", "Student name", "text"),
+        field("studentId", "Student ID", "text"),
+        selectField("requestType", "Request type", ["Enrollment", "Transcript", "Advising", "Financial aid"]),
+        field("targetDate", "Target date", "date", false),
+        field("notes", "Notes", "textarea", false)
+      ]),
+      targetUsers: ["students", "student services staff", "program administrators"],
+      screens: screens("New Student Request", "Student Request List", "Services Admin"),
+      workflowStatuses: ["Submitted", "In Review", "Waiting on Student", "Resolved", "Rejected"],
+      coreActions: ["Create student request", "View student requests", "Update request status", "Filter by status"],
+      approvalPoints: ["Resolve request", "Reject request"],
+      assumptions: ["The school needs a lightweight portal workflow before SIS integration.", "Staff can triage student service requests from one queue."],
+      risks: ["Production use needs authentication, FERPA-aware access controls, and audit logging.", "The prototype does not integrate with a student information system."],
+      seedRecords: [
+        { studentName: "Iris Nguyen", studentId: "S-1042", requestType: "Transcript", targetDate: "2026-06-09", notes: "Needs unofficial copy.", status: "In Review" },
+        { studentName: "Mateo Brooks", studentId: "S-1188", requestType: "Advising", targetDate: "2026-06-12", notes: "Graduation planning.", status: "Submitted" }
+      ]
+    });
+  }
+
+  if (normalized.includes("expense") || normalized.includes("splitter")) {
+    return buildSpec({
+      sourceGoal: goal,
+      appName: "Expense Splitter Desk",
+      appSlug: "expense-splitter-desk",
+      domain: "shared expense tracking",
+      primaryEntity: entity("Expense", "Expenses", "expenses", [
+        field("title", "Title", "text"),
+        field("paidBy", "Paid by", "text"),
+        field("amount", "Amount", "number"),
+        field("participants", "Participants", "text"),
+        selectField("category", "Category", ["Food", "Travel", "Supplies", "Other"]),
+        field("notes", "Notes", "textarea", false)
+      ]),
+      targetUsers: ["friends", "trip organizers", "small group admins"],
+      screens: screens("New Expense", "Expense List", "Settlement Admin"),
+      workflowStatuses: ["Logged", "Reviewed", "Split Calculated", "Settled", "Disputed"],
+      coreActions: ["Create expense", "View expenses", "Update expense status", "Filter by status"],
+      approvalPoints: ["Mark split calculated", "Mark settled"],
+      assumptions: ["The first prototype tracks shared expenses without payment processing.", "Participants can be captured as a simple comma-separated field for review."],
+      risks: ["Production use needs account identity and payment reconciliation.", "Advanced split formulas are not modeled yet."],
+      seedRecords: [
+        { title: "Dinner", paidBy: "Ari", amount: 128, participants: "Ari, Sam, Lee", category: "Food", notes: "Team meal.", status: "Reviewed" },
+        { title: "Train tickets", paidBy: "Lee", amount: 84, participants: "Ari, Sam, Lee", category: "Travel", notes: "Round trip.", status: "Logged" }
+      ]
+    });
+  }
+
+  if (normalized.includes("crm") || normalized.includes("customer relationship") || normalized.includes("lead")) {
+    return buildSpec({
+      sourceGoal: goal,
+      appName: "Small CRM Desk",
+      appSlug: "small-crm-desk",
+      domain: "small business CRM",
+      primaryEntity: entity("Lead", "Leads", "leads", [
+        field("companyName", "Company name", "text"),
+        field("contactName", "Contact name", "text"),
+        field("email", "Email", "text"),
+        selectField("source", "Source", ["Referral", "Website", "Event", "Outbound"]),
+        field("estimatedValue", "Estimated value", "number", false),
+        field("notes", "Notes", "textarea", false)
+      ]),
+      targetUsers: ["solo business owner", "sales assistant", "operations admin"],
+      screens: screens("New Lead", "Lead List", "Pipeline Admin"),
+      workflowStatuses: ["New", "Contacted", "Qualified", "Proposal Sent", "Won", "Lost"],
+      coreActions: ["Create lead", "View leads", "Update lead status", "Filter by status"],
+      approvalPoints: ["Qualify lead", "Mark deal won or lost"],
+      assumptions: ["The business needs a simple pipeline tracker before adopting a full CRM.", "One shared admin queue is enough for a first review."],
+      risks: ["Production use needs email integration, access controls, and activity history.", "Forecasting and reminders are outside the MVP."],
+      seedRecords: [
+        { companyName: "North Pier Studio", contactName: "Dana Fox", email: "dana@example.com", source: "Referral", estimatedValue: 4200, notes: "Needs quote this week.", status: "Qualified" },
+        { companyName: "Greenline Cafe", contactName: "Omar Chen", email: "omar@example.com", source: "Website", estimatedValue: 1800, notes: "Asked about booking site.", status: "New" }
+      ]
+    });
+  }
+
+  if (normalized.includes("landing page") || normalized.includes("local business")) {
+    return buildSpec({
+      sourceGoal: goal,
+      appName: "Local Business Landing Desk",
+      appSlug: "local-business-landing-desk",
+      domain: "landing page content request",
+      primaryEntity: entity("Content Request", "Content Requests", "requests", [
+        field("businessName", "Business name", "text"),
+        selectField("section", "Section", ["Hero", "Services", "About", "Contact"]),
+        field("headline", "Headline", "text"),
+        field("owner", "Owner", "text"),
+        field("notes", "Notes", "textarea", false)
+      ]),
+      targetUsers: ["business owner", "freelance developer", "content reviewer"],
+      screens: screens("New Content Request", "Content Request List", "Landing Page Admin"),
+      workflowStatuses: ["Draft", "In Review", "Approved", "Published Copy", "Rejected"],
+      coreActions: ["Create content request", "View content requests", "Update request status", "Filter by section or status"],
+      approvalPoints: ["Approve landing copy", "Mark copy ready for implementation"],
+      assumptions: ["The first package should organize content and handoff assets before building a public site.", "Publishing is a high-risk action and remains outside the v0 workflow."],
+      risks: ["The prototype does not publish a public website.", "Brand assets and SEO requirements need client review."],
+      seedRecords: [
+        { businessName: "Elm Street Bakery", section: "Hero", headline: "Fresh bread every morning", owner: "Nora", notes: "Mention catering.", status: "In Review" },
+        { businessName: "Elm Street Bakery", section: "Services", headline: "Custom cakes and daily pastries", owner: "Nora", notes: "Add seasonal menu later.", status: "Draft" }
+      ]
+    });
+  }
+
   if (normalized.includes("flower") || normalized.includes("inventory")) {
     return buildSpec({
       sourceGoal: goal,
@@ -214,4 +325,3 @@ function screens(createName: string, listName: string, adminName: string): Scree
     { name: adminName, purpose: "Update workflow status and prepare client review.", actions: ["Update status"] }
   ];
 }
-
