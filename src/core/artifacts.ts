@@ -31,7 +31,9 @@ export class FileArtifactStore implements ArtifactStore {
       finalPackagePath: input.finalPackagePath,
       lineage: {
         inputArtifactIds: input.inputArtifactIds ?? [],
-        promptHash: input.prompt ? sha256(input.prompt) : undefined
+        promptHash: input.prompt ? sha256(input.prompt) : undefined,
+        contextPackageId: input.contextPackageId,
+        contextHash: input.contextHash
       },
       createdAt: now,
       updatedAt: now,

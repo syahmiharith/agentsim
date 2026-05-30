@@ -36,10 +36,11 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | `src/domain/` | Defines the software-freelance domain pack and deterministic domain-spec inference. |
 | `src/templates/` | Generates Markdown artifacts and the runnable app prototype. |
 | `src/core/artifacts.ts` | Writes artifacts, content hashes, status metadata, and lineage. |
+| `src/core/context.ts` | Assembles, validates, renders, and evaluates context packages. |
 | `src/core/events.ts` | Writes redacted JSONL event traces. |
-| `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, and lineage. |
+| `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, lineage, and context provenance. |
 | `src/core/paths.ts` | Prevents absolute-path use and workspace escape for relative path operations. |
-| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, actions, messages, events, and approvals. |
+| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, actions, context packages, messages, events, and approvals. |
 | `src/core/scheduler.ts` | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets. |
 | `src/core/state-machines.ts` | Validates allowed run and task status transitions. |
 | `src/core/task-compiler.ts` | Converts the existing `AgentStep` registry into a deterministic task graph. |
@@ -105,6 +106,8 @@ pnpm agentsim events <runId>
 pnpm agentsim artifacts <runId>
 pnpm agentsim tasks <runId>
 pnpm agentsim approvals <runId>
+pnpm agentsim contexts <runId>
+pnpm agentsim context <runId> <contextPackageId>
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
 pnpm agentsim resume <runId>
@@ -126,6 +129,7 @@ Main responsibilities:
 - infer a `DomainSpec` through the domain pack
 - record provider and domain decisions
 - execute tasks through the scheduler in deterministic compiled-step order
+- assemble and validate a context package before each agent action
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
 - validate package completeness and convert validation into a review verdict
@@ -166,8 +170,10 @@ Artifact expectations:
 - every artifact has review and approval status
 - every artifact has a content hash
 - every artifact records input artifact lineage
+- every artifact records the context package used to produce it
 - exported package paths match the domain pack manifest
 - every produced artifact is tied to a completed agent action
+- every completed agent action records a context package id and hash
 - agents communicate through structured task assignments, artifact handoffs, and review requests
 
 Trace expectations:
@@ -175,6 +181,8 @@ Trace expectations:
 - `trace/events.jsonl` records important run events
 - `trace/agent-messages.json` records bounded agent communication, including sender, recipient, related artifact, question, and expected output
 - `trace/agent-actions.json` records each agent action, input artifact IDs, output artifact ID, model/template source, and completion status
+- `trace/context-packages.json` records the validated context package used by each completed action
+- `trace/context-eval.json` records context coverage, size, and provenance checks
 - `trace/decisions.json` records system and human decisions
 - `trace/approvals.json` records approval state
 - `trace/domain-spec.json` records inferred domain behavior
@@ -190,6 +198,7 @@ outputs/{runId}/state/
 +-- run.json
 +-- tasks.json
 +-- agent-actions.json
++-- context-packages.json
 +-- messages.json
 +-- events.jsonl
 +-- artifacts.json
@@ -197,6 +206,20 @@ outputs/{runId}/state/
 ```
 
 The `state/` files are for local resume, inspection, approvals, and scheduler state. The `final-package/trace/` files remain the reviewer-facing debug output.
+
+## Context Package Layer
+
+`src/core/context.ts` turns runtime context into an inspectable contract. Before an agent step executes, the orchestrator assembles a `ContextPackage` from the user goal, task objective, domain spec, required input artifacts, structured messages, decisions, and approvals allowed by the step policy.
+
+Validation gates enforce:
+
+- required context kinds are present
+- item hashes match item content
+- item and package size limits are respected
+- required input artifacts are represented in artifact context items
+- the package hash matches the canonical package contents
+
+Live model prompts are rendered from `ContextPackage` instead of ad hoc artifact reads inside agent steps. Final-package validation checks that each completed action references a stored context package and that the produced artifact lineage carries the same context package id and hash.
 
 ## Workspace Layer
 

@@ -4,11 +4,12 @@ import { dirname, join, resolve } from "node:path";
 import { getAgent } from "./agents/agents.js";
 import { agentSteps as defaultAgentSteps } from "./agents/steps.js";
 import { FileArtifactStore } from "./core/artifacts.js";
+import { assembleContextPackage, evaluateContextPackages, validateContextPackage } from "./core/context.js";
 import { CompositeEventStore, JsonlEventStore } from "./core/events.js";
 import { validateFinalPackage as defaultValidateFinalPackage } from "./core/final-package-validation.js";
 import { safeJoin } from "./core/paths.js";
 import { redactSecrets } from "./core/redact.js";
-import { LocalAgentActionsRepo, LocalApprovalsRepo, LocalArtifactsRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
+import { LocalAgentActionsRepo, LocalApprovalsRepo, LocalArtifactsRepo, LocalContextPackagesRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
 import { createFixTask, reviewResultFromValidation } from "./core/review-loop.js";
 import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, markReadyTasks } from "./core/scheduler.js";
 import { compileAgentStepsToTasks } from "./core/task-compiler.js";
@@ -25,6 +26,7 @@ import type {
   Approval,
   Artifact,
   ArtifactType,
+  ContextPackage,
   Decision,
   DomainPack,
   EventStore,
@@ -79,11 +81,13 @@ interface OrchestratorRuntime {
   tasksRepo: LocalTasksRepo;
   artifactsRepo: LocalArtifactsRepo;
   agentActionsRepo: LocalAgentActionsRepo;
+  contextPackagesRepo: LocalContextPackagesRepo;
   messagesRepo: LocalMessagesRepo;
   approvalsRepo: LocalApprovalsRepo;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
   agentActions: AgentActionRecord[];
   agentMessages: AgentMessageRecord[];
+  contextPackages: ContextPackage[];
   decisions: Decision[];
   steps: AgentStep[];
   validateFinalPackage: typeof defaultValidateFinalPackage;
@@ -106,6 +110,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const tasksRepo = new LocalTasksRepo(workspace.rootDir);
   const artifactsRepo = new LocalArtifactsRepo(workspace.rootDir);
   const agentActionsRepo = new LocalAgentActionsRepo(workspace.rootDir);
+  const contextPackagesRepo = new LocalContextPackagesRepo(workspace.rootDir);
   const messagesRepo = new LocalMessagesRepo(workspace.rootDir);
   const approvalsRepo = new LocalApprovalsRepo(workspace.rootDir);
   const domainPack = options.domainPack ?? softwareFreelancePack;
@@ -114,6 +119,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const decisions: Decision[] = [];
   const agentActions: AgentActionRecord[] = [];
   const agentMessages: AgentMessageRecord[] = [];
+  const contextPackages: ContextPackage[] = [];
   const artifactsByType: Partial<Record<ArtifactType, Artifact>> = {};
   const taskRun: TaskRun = {
     id: runId,
@@ -138,11 +144,13 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     tasksRepo,
     artifactsRepo,
     agentActionsRepo,
+    contextPackagesRepo,
     messagesRepo,
     approvalsRepo,
     artifactsByType,
     agentActions,
     agentMessages,
+    contextPackages,
     decisions,
     steps,
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
@@ -214,6 +222,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const tasksRepo = new LocalTasksRepo(runRoot);
   const artifactsRepo = new LocalArtifactsRepo(runRoot);
   const agentActionsRepo = new LocalAgentActionsRepo(runRoot);
+  const contextPackagesRepo = new LocalContextPackagesRepo(runRoot);
   const messagesRepo = new LocalMessagesRepo(runRoot);
   const artifacts = await artifactsRepo.listArtifactsByRun();
   const artifactStore = new FileArtifactStore(workspace, artifacts);
@@ -254,6 +263,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   ];
   const agentActions = await agentActionsRepo.listActionsByRun();
   const agentMessages = await messagesRepo.listMessagesByRun();
+  const contextPackages = await contextPackagesRepo.listContextPackagesByRun();
   const artifactsByType = Object.fromEntries(artifacts.map((artifact) => [artifact.type, artifact])) as Partial<Record<ArtifactType, Artifact>>;
   const runtime: OrchestratorRuntime = {
     runId: options.runId,
@@ -269,11 +279,13 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     tasksRepo,
     artifactsRepo,
     agentActionsRepo,
+    contextPackagesRepo,
     messagesRepo,
     approvalsRepo,
     artifactsByType,
     agentActions,
     agentMessages,
+    contextPackages,
     decisions,
     steps,
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
@@ -470,6 +482,33 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     });
   }
 
+  const contextPackage = await assembleContextPackage({
+    runId: runtime.runId,
+    goal: runtime.safeGoal,
+    task,
+    step,
+    domainSpec: runtime.domainSpec,
+    artifactsByType: runtime.artifactsByType,
+    messages: currentMessages,
+    decisions: runtime.decisions,
+    approvals: await runtime.approvalsRepo.listApprovalsByRun(),
+    policy: step.contextPolicy
+  });
+  const contextValidation = validateContextPackage(contextPackage);
+  if (!contextValidation.ok) {
+    await runtime.eventStore.append({
+      level: "error",
+      name: "context.validation_failed",
+      agentId: step.ownerAgentId,
+      taskId: task.id,
+      message: `Context package validation failed for ${task.id}.`,
+      data: { failures: contextValidation.failures }
+    });
+    return { status: "failed", error: `Context package validation failed: ${contextValidation.failures.join("; ")}` };
+  }
+  await runtime.contextPackagesRepo.createContextPackage(contextPackage);
+  runtime.contextPackages.push(contextPackage);
+
   const context: AgentContext = {
     runId: runtime.runId,
     goal: runtime.safeGoal,
@@ -478,6 +517,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     workspace: runtime.workspace,
     workspaceDriver: runtime.workspaceDriver,
     artifactsByType: runtime.artifactsByType,
+    contextPackage,
     tools: createToolRuntime({
       runId: runtime.runId,
       workspace: runtime.workspace,
@@ -504,7 +544,9 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       action: step.action,
       outputType: step.outputType,
       requiredInputs: step.requiredInputs,
-      reviewRequired: step.reviewRequired
+      reviewRequired: step.reviewRequired,
+      contextPackageId: contextPackage.id,
+      contextHash: contextPackage.contextHash
     }
   });
 
@@ -517,6 +559,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     outputType: step.outputType,
     inputMessageIds: currentMessages.map((message) => message.id),
     inputArtifactIds,
+    contextPackageId: contextPackage.id,
+    contextHash: contextPackage.contextHash,
     status: "started",
     modelMode: runtime.modelProvider.mode,
     provider: runtime.modelProvider.name,
@@ -537,6 +581,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       workspaceRelativePath: stepResult.workspaceRelativePath,
       finalPackagePath: stepResult.finalPackagePath,
       inputArtifactIds,
+      contextPackageId: contextPackage.id,
+      contextHash: contextPackage.contextHash,
       status: stepResult.status,
       reviewStatus: stepResult.reviewStatus,
       approvalStatus: stepResult.approvalStatus
@@ -559,6 +605,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
         outputType: step.outputType,
         outputSource: stepResult.outputSource,
         model: stepResult.model,
+        contextPackageId: contextPackage.id,
+        contextHash: contextPackage.contextHash,
         summary: stepResult.actionSummary
       }
     });
@@ -828,6 +876,15 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-messages.json"), JSON.stringify({ messages: runtime.agentMessages }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-actions.json"), JSON.stringify({ actions: runtime.agentActions }, null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-packages.json"), JSON.stringify({ contextPackages: runtime.contextPackages }, null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-eval.json"), JSON.stringify({
+    evaluation: evaluateContextPackages({
+      runId: runtime.runId,
+      packages: runtime.contextPackages,
+      actions: runtime.agentActions,
+      artifacts: runtime.artifactStore.list()
+    })
+  }, null, 2), "utf8");
   await runtime.artifactStore.exportLineage(safeJoin(runtime.workspace.finalPackageDir, "trace/artifact-lineage.json"));
 }
 
@@ -846,6 +903,8 @@ async function createArtifact(input: {
   workspaceRelativePath: string;
   finalPackagePath: string;
   inputArtifactIds?: string[];
+  contextPackageId?: string;
+  contextHash?: string;
   status?: Parameters<FileArtifactStore["createMarkdown"]>[0]["status"];
   reviewStatus?: Parameters<FileArtifactStore["createMarkdown"]>[0]["reviewStatus"];
   approvalStatus?: Parameters<FileArtifactStore["createMarkdown"]>[0]["approvalStatus"];
@@ -860,6 +919,8 @@ async function createArtifact(input: {
     workspaceRelativePath: input.workspaceRelativePath,
     finalPackagePath: input.finalPackagePath,
     inputArtifactIds: input.inputArtifactIds,
+    contextPackageId: input.contextPackageId,
+    contextHash: input.contextHash,
     reviewStatus: input.reviewStatus,
     approvalStatus: input.approvalStatus,
     status: input.status,
@@ -875,7 +936,9 @@ async function createArtifact(input: {
     data: {
       artifactType: input.type,
       finalPackagePath: input.finalPackagePath,
-      inputArtifactIds: input.inputArtifactIds ?? []
+      inputArtifactIds: input.inputArtifactIds ?? [],
+      contextPackageId: input.contextPackageId,
+      contextHash: input.contextHash
     }
   });
 

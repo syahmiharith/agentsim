@@ -43,6 +43,8 @@ describe("demo workflow", () => {
       "trace/events.jsonl",
       "trace/agent-messages.json",
       "trace/agent-actions.json",
+      "trace/context-packages.json",
+      "trace/context-eval.json",
       "trace/approvals.json",
       "trace/decisions.json",
       "trace/domain-spec.json",
@@ -67,7 +69,15 @@ describe("demo workflow", () => {
 
     const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
     expect(agentActions.actions).toHaveLength(result.artifacts.length);
-    expect(agentActions.actions.every((action: { status: string; outputArtifactId?: string }) => action.status === "completed" && Boolean(action.outputArtifactId))).toBe(true);
+    expect(agentActions.actions.every((action: { status: string; outputArtifactId?: string; contextPackageId?: string; contextHash?: string }) =>
+      action.status === "completed" && Boolean(action.outputArtifactId) && Boolean(action.contextPackageId) && Boolean(action.contextHash)
+    )).toBe(true);
+
+    const contextPackages = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "context-packages.json"), "utf8"));
+    expect(contextPackages.contextPackages).toHaveLength(agentActions.actions.length);
+    const contextEval = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "context-eval.json"), "utf8"));
+    expect(contextEval.evaluation.requiredCoverageOk).toBe(true);
+    expect(contextEval.evaluation.provenanceOk).toBe(true);
 
     const agentMessages = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-messages.json"), "utf8"));
     expect(agentMessages.messages.length).toBeGreaterThan(result.artifacts.length);
@@ -90,10 +100,12 @@ describe("demo workflow", () => {
     const stateRun = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "run.json"), "utf8"));
     const stateTasks = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "tasks.json"), "utf8"));
     const stateArtifacts = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "artifacts.json"), "utf8"));
+    const stateContextPackages = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "context-packages.json"), "utf8"));
     const stateEvents = await readFile(join(outputRoot, "test-run", "state", "events.jsonl"), "utf8");
     expect(stateRun.status).toBe("completed");
     expect(stateTasks.every((task: { status: string; attempts: number }) => task.status === "completed" && task.attempts === 1)).toBe(true);
     expect(stateArtifacts).toHaveLength(result.artifacts.length);
+    expect(stateContextPackages).toHaveLength(agentActions.actions.length);
     expect(stateEvents).toContain("task.started");
     expect(stateEvents).toContain("task.completed");
   });

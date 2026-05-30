@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { renderModelPrompt } from "../core/context.js";
 import { validateGeneratedApp } from "../core/generated-app-validation.js";
 import { getAgent } from "./agents.js";
 import {
@@ -117,15 +117,9 @@ async function generateLiveMarkdown(
   step: Pick<AgentStep, "id" | "ownerAgentId" | "outputType" | "requiredInputs" | "reviewRequired"> & { fallbackContent: string }
 ): Promise<{ content: string; outputSource: AgentOutputSource; model: string }> {
   const agent = getAgent(step.ownerAgentId);
-  const inputSummaries = await Promise.all(step.requiredInputs.map(async (type) => {
-    const artifact = context.artifactsByType[type];
-    if (!artifact) {
-      return `- ${type}: missing`;
-    }
-
-    const content = await readFile(artifact.workspacePath, "utf8");
-    return `- ${type} (${artifact.finalPackagePath}):\n${truncate(content, 1800)}`;
-  }));
+  if (!context.contextPackage) {
+    throw new Error(`Missing context package for live step ${step.id}.`);
+  }
 
   const response = await context.modelProvider.generate({
     system: [
@@ -136,21 +130,11 @@ async function generateLiveMarkdown(
       "Do not invent hosted deployment, payments, authentication, or production claims.",
       "Keep the output aligned with a local artifact-first CLI handoff package."
     ].join("\n"),
-    prompt: [
-      `Client goal: ${context.goal}`,
-      `Domain spec:\n${JSON.stringify(context.domainSpec, null, 2)}`,
-      `Step: ${step.id}`,
-      `Output artifact type: ${step.outputType}`,
-      `Review required: ${String(step.reviewRequired)}`,
-      "Structured messages for this agent action:",
-      context.currentMessages && context.currentMessages.length > 0
-        ? context.currentMessages.map((message) => `- ${message.type} from ${message.from}: ${message.question} Expected output: ${message.expectedOutput}`).join("\n")
-        : "- none",
-      "Input artifacts:",
-      inputSummaries.length > 0 ? inputSummaries.join("\n\n") : "- none",
-      "Use this deterministic scaffold as the minimum expected coverage. Rewrite it with useful, specific project content while preserving the artifact's purpose:",
-      step.fallbackContent
-    ].join("\n\n"),
+    prompt: renderModelPrompt(context.contextPackage, {
+      fallbackContent: step.fallbackContent,
+      outputType: step.outputType,
+      reviewRequired: step.reviewRequired
+    }),
     purpose: `agent-step:${step.id}`
   });
 
@@ -159,13 +143,6 @@ async function generateLiveMarkdown(
     outputSource: "model",
     model: response.model
   };
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength)}\n... [truncated]`;
 }
 
 function stripMarkdownFences(value: string): string {

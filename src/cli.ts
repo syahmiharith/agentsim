@@ -5,13 +5,13 @@ import { Command } from "commander";
 import { z } from "zod";
 import { loadDotEnv } from "./config.js";
 import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
-import { loadRunInspection, renderApprovals, renderArtifacts, renderEvents, renderInspect, renderTasks } from "./inspection.js";
+import { loadRunInspection, renderApprovals, renderArtifacts, renderContext, renderContexts, renderEvents, renderInspect, renderTasks } from "./inspection.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
 import { startDashboard } from "./tui/run-inspector.js";
 import { resumeOrchestrator } from "./orchestrator.js";
 import { runDemo } from "./workflow.js";
 
-type CliCommand = "run" | "demo" | "dashboard" | "tui" | "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "approve" | "reject" | "resume";
+type CliCommand = "run" | "demo" | "dashboard" | "tui" | "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "contexts" | "context" | "approve" | "reject" | "resume";
 
 interface CliOptions {
   command?: CliCommand | string;
@@ -19,15 +19,17 @@ interface CliOptions {
   providerSelection: ProviderSelection;
   outputRoot: string;
   runId?: string;
+  contextPackageId?: string;
   approvalId?: string;
 }
 
 const cliOptionsSchema = z.object({
-  command: z.enum(["run", "demo", "dashboard", "tui", "inspect", "events", "artifacts", "tasks", "approvals", "approve", "reject", "resume"]).optional(),
+  command: z.enum(["run", "demo", "dashboard", "tui", "inspect", "events", "artifacts", "tasks", "approvals", "contexts", "context", "approve", "reject", "resume"]).optional(),
   goal: z.string().trim().min(1).optional(),
   providerSelection: z.enum(["auto", "mock", "live"]),
   outputRoot: z.string().trim().min(1),
   runId: z.string().trim().min(1).optional(),
+  contextPackageId: z.string().trim().min(1).optional(),
   approvalId: z.string().trim().min(1).optional()
 });
 
@@ -68,7 +70,11 @@ export async function main(argv: string[]): Promise<void> {
           ? renderArtifacts(model)
           : options.command === "tasks"
             ? renderTasks(model)
-            : renderApprovals(model);
+            : options.command === "approvals"
+              ? renderApprovals(model)
+              : options.command === "contexts"
+                ? renderContexts(model)
+                : renderContext(model, options.contextPackageId);
     console.log(output);
     return;
   }
@@ -171,6 +177,12 @@ export function parseArgs(argv: string[]): CliOptions {
   addInspectionCommand(program, "approvals", (options) => {
     parsed = options;
   });
+  addInspectionCommand(program, "contexts", (options) => {
+    parsed = options;
+  });
+  addContextCommand(program, (options) => {
+    parsed = options;
+  });
   addApprovalCommand(program, "approve", (options) => {
     parsed = options;
   });
@@ -188,11 +200,13 @@ export function parseArgs(argv: string[]): CliOptions {
 function isSupportedCommand(command: string | undefined): command is CliCommand {
   return command === "run" || command === "demo" || command === "dashboard" || command === "tui" ||
     command === "inspect" || command === "events" || command === "artifacts" || command === "tasks" ||
-    command === "approvals" || command === "approve" || command === "reject" || command === "resume";
+    command === "approvals" || command === "contexts" || command === "context" ||
+    command === "approve" || command === "reject" || command === "resume";
 }
 
-function isInspectionCommand(command: string | undefined): command is "inspect" | "events" | "artifacts" | "tasks" | "approvals" {
-  return command === "inspect" || command === "events" || command === "artifacts" || command === "tasks" || command === "approvals";
+function isInspectionCommand(command: string | undefined): command is "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "contexts" | "context" {
+  return command === "inspect" || command === "events" || command === "artifacts" || command === "tasks" ||
+    command === "approvals" || command === "contexts" || command === "context";
 }
 
 function addRunCommand(program: Command, name: "run" | "demo", onParse: (options: CliOptions) => void): void {
@@ -232,7 +246,7 @@ function addDashboardCommand(program: Command, name: "dashboard" | "tui", onPars
     });
 }
 
-function addInspectionCommand(program: Command, name: "inspect" | "events" | "artifacts" | "tasks" | "approvals", onParse: (options: CliOptions) => void): void {
+function addInspectionCommand(program: Command, name: "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "contexts", onParse: (options: CliOptions) => void): void {
   program
     .command(name)
     .argument("[runId]", "run id to inspect")
@@ -242,6 +256,24 @@ function addInspectionCommand(program: Command, name: "inspect" | "events" | "ar
         command: name,
         goal: runId,
         runId,
+        providerSelection: "auto",
+        outputRoot: flags.outDir
+      });
+    });
+}
+
+function addContextCommand(program: Command, onParse: (options: CliOptions) => void): void {
+  program
+    .command("context")
+    .argument("<runId>", "run id to inspect")
+    .argument("<contextPackageId>", "context package id to inspect")
+    .option("--out-dir <dir>", "output root directory", "outputs")
+    .action((runId: string, contextPackageId: string, flags: { outDir: string }) => {
+      onParse({
+        command: "context",
+        goal: runId,
+        runId,
+        contextPackageId,
         providerSelection: "auto",
         outputRoot: flags.outDir
       });
@@ -307,12 +339,16 @@ function printUsage(): void {
   agentsim artifacts [runId] [--out-dir outputs]
   agentsim tasks [runId] [--out-dir outputs]
   agentsim approvals [runId] [--out-dir outputs]
+  agentsim contexts [runId] [--out-dir outputs]
+  agentsim context <runId> <contextPackageId> [--out-dir outputs]
   agentsim approve <runId> <approvalId> [--out-dir outputs]
   agentsim reject <runId> <approvalId> [--out-dir outputs]
   agentsim resume <runId> [--out-dir outputs]
   pnpm agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
   pnpm agentsim dashboard [runId] [--out-dir outputs]
   pnpm agentsim tui [runId] [--out-dir outputs]
+  pnpm agentsim contexts [runId] [--out-dir outputs]
+  pnpm agentsim context <runId> <contextPackageId> [--out-dir outputs]
   pnpm demo "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
 `);
 }

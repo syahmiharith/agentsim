@@ -35,6 +35,15 @@ describe("CLI parsing", () => {
     expect(options.command).toBe("inspect");
     expect(options.runId).toBe("test-run");
     expect(options.outputRoot).toBe("custom-outputs");
+
+    const contexts = parseArgs(["contexts", "test-run"]);
+    expect(contexts.command).toBe("contexts");
+    expect(contexts.runId).toBe("test-run");
+
+    const context = parseArgs(["context", "test-run", "ctx-1"]);
+    expect(context.command).toBe("context");
+    expect(context.runId).toBe("test-run");
+    expect(context.contextPackageId).toBe("ctx-1");
   });
 
   it("parses approval and resume commands", () => {

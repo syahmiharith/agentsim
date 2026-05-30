@@ -42,18 +42,18 @@ pnpm agentsim run "Build an inventory request system for a flower company" --moc
 Current capabilities:
 
 - TypeScript CLI and local filesystem workspace.
-- Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Run`, `Task`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
+- Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Run`, `Task`, `Artifact`, `ContextPackage`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
 - Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
 - Deterministic task graph compilation from the current `AgentStep` registry.
-- Local run, task, artifact, message, event, and approval state persistence.
+- Local run, task, artifact, message, context package, event, and approval state persistence.
 - Real local resume from persisted run state after approvals are resolved.
 - Scheduler helpers for dependency-ready, blocked, failed, and terminal task state.
 - State transition helpers for run and task lifecycles.
 - Risk-aware local tool wrappers for workspace files, artifacts, commands, and human approval requests.
-- CLI inspection commands for runs, events, artifacts, tasks, and approvals.
+- CLI inspection commands for runs, events, artifacts, tasks, approvals, and context packages.
 - Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
-- Structured agent messages, agent action records, artifact lineage, decision logs, approval records, and event trace.
+- Structured agent messages, agent action records, context packages, artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
 - Final package validation and `run-summary.json`.
 
@@ -77,9 +77,9 @@ Build:
 Acceptance:
 
 - One command creates a complete delivery package.
-- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, events, decisions, approvals, lineage, and run summary.
-- Every run has persisted run, task, artifact, message, event, and approval state.
-- Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim events`, `agentsim artifacts`, and `agentsim approvals`.
+- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, context packages, events, decisions, approvals, lineage, and run summary.
+- Every run has persisted run, task, artifact, message, context package, event, and approval state.
+- Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim events`, `agentsim artifacts`, `agentsim approvals`, `agentsim contexts`, and `agentsim context`.
 - Approval-paused runs can continue with `agentsim approve` followed by `agentsim resume`.
 - The code still defaults to local filesystem and mock mode without keys.
 

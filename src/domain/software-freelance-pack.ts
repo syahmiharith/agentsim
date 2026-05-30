@@ -74,6 +74,8 @@ export const softwareFreelancePack: DomainPack = {
     "trace/events.jsonl",
     "trace/agent-messages.json",
     "trace/agent-actions.json",
+    "trace/context-packages.json",
+    "trace/context-eval.json",
     "trace/approvals.json",
     "trace/decisions.json",
     "trace/domain-spec.json",

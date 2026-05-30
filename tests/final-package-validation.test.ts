@@ -1,11 +1,12 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { validateFinalPackage } from "../src/core/final-package-validation.js";
+import { assembleContextPackage, evaluateContextPackages } from "../src/core/context.js";
 import { sha256 } from "../src/core/hash.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
-import type { AgentActionRecord, Artifact } from "../src/types.js";
+import type { AgentActionRecord, AgentMessageRecord, AgentStep, Artifact, ContextPackage, Task } from "../src/types.js";
 
 describe("validateFinalPackage", () => {
   it("passes a complete package manifest", async () => {
@@ -49,6 +50,118 @@ describe("validateFinalPackage", () => {
 
     expect(result.ok).toBe(false);
     expect(result.failures).toContain("Missing required trace file: trace/decisions.json");
+  });
+
+  it("requires context package and evaluation trace files", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    await rm(join(finalPackageDir, "trace", "context-packages.json"));
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Missing required trace file: trace/context-packages.json");
+  });
+
+  it("rejects actions without context provenance", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const actionsPath = join(finalPackageDir, "trace", "agent-actions.json");
+    const actions = createAgentActions(artifacts);
+    await writeFile(actionsPath, JSON.stringify({
+      actions: actions.map((action, index) => index === 0
+        ? { ...action, contextPackageId: undefined, contextHash: undefined }
+        : action)
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Agent action step-0 is missing contextPackageId");
+  });
+
+  it("rejects tampered action context hashes", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const actionsPath = join(finalPackageDir, "trace", "agent-actions.json");
+    await writeFile(actionsPath, JSON.stringify({
+      actions: createAgentActions(artifacts).map((action, index) => index === 0
+        ? { ...action, contextHash: "tampered" }
+        : action)
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Agent action step-0 contextHash does not match stored context package");
+  });
+
+  it("rejects artifacts without matching context lineage", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const expectedContextPackageId = artifacts[0].lineage.contextPackageId;
+    artifacts[0] = {
+      ...artifacts[0],
+      lineage: { ...artifacts[0].lineage, contextPackageId: undefined, contextHash: undefined }
+    };
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain(`Artifact ${artifacts[0].type} lineage is missing contextPackageId ${expectedContextPackageId}`);
+  });
+
+  it("rejects tampered context item hashes and failed context eval", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const contextPath = join(finalPackageDir, "trace", "context-packages.json");
+    const contextTrace = JSON.parse(await readFile(contextPath, "utf8"));
+    contextTrace.contextPackages[0].items[0].contentHash = "tampered";
+    await writeFile(contextPath, JSON.stringify(contextTrace, null, 2), "utf8");
+    await writeFile(join(finalPackageDir, "trace", "context-eval.json"), JSON.stringify({
+      evaluation: {
+        runId: "validation-run",
+        generatedAt: "2026-05-30T00:00:00.000Z",
+        packageCount: contextTrace.contextPackages.length,
+        actionCount: artifacts.length,
+        artifactCount: artifacts.length,
+        totalItemCount: 1,
+        totalChars: 1,
+        requiredCoverageOk: false,
+        provenanceOk: false,
+        failures: ["missing context"]
+      }
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toEqual(expect.arrayContaining([
+      `Context item ${contextTrace.contextPackages[0].items[0].id} contentHash does not match content`,
+      "Context evaluation reports incomplete required coverage",
+      "Context evaluation reports incomplete provenance",
+      "Context evaluation failure: missing context"
+    ]));
   });
 
   it("reports invalid artifact lineage", async () => {
@@ -258,13 +371,75 @@ async function createArtifacts(finalPackageDir: string): Promise<Artifact[]> {
   }
 
   const messages = createAgentMessages(artifacts);
+  const contextPackages = await createContextPackages(artifacts, messages);
+  for (const [index, artifact] of artifacts.entries()) {
+    const contextPackage = contextPackages[index];
+    artifact.lineage = {
+      ...artifact.lineage,
+      contextPackageId: contextPackage?.id,
+      contextHash: contextPackage?.contextHash
+    };
+  }
+  const actions = createAgentActions(artifacts, messages, contextPackages);
   await writeFile(join(finalPackageDir, "trace", "agent-messages.json"), JSON.stringify({ messages }, null, 2), "utf8");
-  await writeFile(join(finalPackageDir, "trace", "agent-actions.json"), JSON.stringify({ actions: createAgentActions(artifacts, messages) }, null, 2), "utf8");
+  await writeFile(join(finalPackageDir, "trace", "agent-actions.json"), JSON.stringify({ actions }, null, 2), "utf8");
+  await writeFile(join(finalPackageDir, "trace", "context-packages.json"), JSON.stringify({ contextPackages }, null, 2), "utf8");
+  await writeFile(join(finalPackageDir, "trace", "context-eval.json"), JSON.stringify({
+    evaluation: evaluateContextPackages({ runId: "validation-run", packages: contextPackages, actions, artifacts })
+  }, null, 2), "utf8");
 
   return artifacts;
 }
 
-function createAgentActions(artifacts: Artifact[], messages = createAgentMessages(artifacts)): AgentActionRecord[] {
+async function createContextPackages(artifacts: Artifact[], messages = createAgentMessages(artifacts)): Promise<ContextPackage[]> {
+  const domainSpec = softwareFreelancePack.inferDomainSpec("Build an inventory request system for a flower company");
+  const artifactsByType = Object.fromEntries(artifacts.map((artifact) => [artifact.type, artifact]));
+  const contextPackages: ContextPackage[] = [];
+  for (const [index, artifact] of artifacts.entries()) {
+    const requiredInputs = index === 0 ? [] : [artifacts[index - 1]?.type].filter(Boolean) as AgentStep["requiredInputs"];
+    const step: AgentStep = {
+      id: `step-${index}`,
+      ownerAgentId: artifact.ownerAgentId,
+      action: `produce ${artifact.type}`,
+      outputType: artifact.type,
+      requiredInputs,
+      reviewRequired: artifact.reviewStatus !== "not_required",
+      async execute() {
+        throw new Error("test helper step should not execute");
+      }
+    };
+    const task: Task = {
+      id: step.id,
+      runId: "validation-run",
+      title: `Produce ${artifact.type}`,
+      description: `Complete ${artifact.type}`,
+      kind: "artifact_generation",
+      assignedAgentId: artifact.ownerAgentId,
+      status: "completed",
+      dependsOn: [],
+      requiredArtifactTypes: requiredInputs,
+      outputArtifactType: artifact.type,
+      attempts: 1,
+      maxAttempts: 2,
+      createdAt: "2026-05-30T00:00:00.000Z",
+      updatedAt: "2026-05-30T00:00:00.000Z"
+    };
+    contextPackages.push(await assembleContextPackage({
+      runId: "validation-run",
+      goal: "Build an inventory request system for a flower company",
+      task,
+      step,
+      domainSpec,
+      artifactsByType,
+      messages: [messages[index]],
+      decisions: [],
+      approvals: []
+    }));
+  }
+  return contextPackages;
+}
+
+function createAgentActions(artifacts: Artifact[], messages = createAgentMessages(artifacts), contextPackages: ContextPackage[] = []): AgentActionRecord[] {
   return artifacts.map((artifact, index) => ({
     id: `action-${index}`,
     runId: "validation-run",
@@ -274,6 +449,8 @@ function createAgentActions(artifacts: Artifact[], messages = createAgentMessage
     outputType: artifact.type,
     inputMessageIds: [messages[index]?.id ?? "missing-message"],
     inputArtifactIds: artifact.lineage.inputArtifactIds,
+    contextPackageId: contextPackages[index]?.id ?? artifact.lineage.contextPackageId,
+    contextHash: contextPackages[index]?.contextHash ?? artifact.lineage.contextHash,
     outputArtifactId: artifact.id,
     status: "completed",
     modelMode: "mock",
@@ -285,7 +462,7 @@ function createAgentActions(artifacts: Artifact[], messages = createAgentMessage
   }));
 }
 
-function createAgentMessages(artifacts: Artifact[]) {
+function createAgentMessages(artifacts: Artifact[]): AgentMessageRecord[] {
   return artifacts.map((artifact, index) => ({
     id: `message-${index}`,
     runId: "validation-run",

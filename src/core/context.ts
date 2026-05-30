@@ -40,7 +40,7 @@ export interface RenderModelPromptOptions {
 }
 
 export function defaultContextPolicyForStep(step: AgentStep): ContextPolicy {
-  const requiredKinds: ContextItemKind[] = ["user_goal", "task"];
+  const requiredKinds: ContextItemKind[] = ["user_goal", "task", "domain_spec"];
   if (step.requiredInputs.length > 0) {
     requiredKinds.push("artifact");
   }
@@ -276,6 +276,7 @@ export function renderModelPrompt(pkg: ContextPackage, options: RenderModelPromp
     `Objective: ${pkg.objective}`,
     `Output artifact type: ${options.outputType}`,
     `Review required: ${String(options.reviewRequired)}`,
+    "Structured messages for this agent action are included as message context items.",
     "Context items:",
     ...pkg.items.map((item) => [
       `## ${item.kind} | ${item.source}`,

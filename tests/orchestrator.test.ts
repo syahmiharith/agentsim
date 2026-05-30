@@ -29,11 +29,15 @@ describe("scheduler-driven orchestrator", () => {
     expect(executed).toEqual(["client-proposal", "planning-requirements", "delivery-user-guide"]);
 
     const tasks = JSON.parse(await readFile(join(outputRoot, "happy-run", "state", "tasks.json"), "utf8"));
+    const contextPackages = JSON.parse(await readFile(join(outputRoot, "happy-run", "state", "context-packages.json"), "utf8"));
+    const actions = JSON.parse(await readFile(join(outputRoot, "happy-run", "state", "agent-actions.json"), "utf8"));
     expect(tasks.map((task: { id: string; status: string; attempts: number }) => [task.id, task.status, task.attempts])).toEqual([
       ["client-proposal", "completed", 1],
       ["planning-requirements", "completed", 1],
       ["delivery-user-guide", "completed", 1]
     ]);
+    expect(contextPackages).toHaveLength(3);
+    expect(actions.every((action: { contextPackageId?: string; contextHash?: string }) => action.contextPackageId && action.contextHash)).toBe(true);
   });
 
   it("retries a failed task and fails the run after max attempts", async () => {
@@ -78,6 +82,41 @@ describe("scheduler-driven orchestrator", () => {
 
     const run = JSON.parse(await readFile(join(outputRoot, "missing-input-run", "state", "run.json"), "utf8"));
     expect(run.status).toBe("failed");
+  });
+
+  it("fails a task before execution when context validation fails", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-context-fail-"));
+    let executed = false;
+
+    await expect(runOrchestrator({
+      goal: "Build a context gated package",
+      outputRoot,
+      runId: "context-fail-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [{
+        ...testStep("client-proposal", "proposal", [], "client/proposal.md"),
+        contextPolicy: {
+          requiredKinds: ["user_goal", "task"],
+          allowedArtifactTypes: [],
+          maxCharsPerItem: 1,
+          maxTotalChars: 1,
+          includeDomainSpec: true,
+          includeMessages: true,
+          includeDecisions: true,
+          includeApprovals: true,
+          allowedTools: []
+        },
+        async execute() {
+          executed = true;
+          throw new Error("should not execute");
+        }
+      }],
+      validateFinalPackage: async () => okValidation()
+    })).rejects.toThrow("Context package validation failed");
+
+    expect(executed).toBe(false);
+    const events = await readFile(join(outputRoot, "context-fail-run", "state", "events.jsonl"), "utf8");
+    expect(events).toContain("context.validation_failed");
   });
 
   it("marks the run failed when final package validation fails", async () => {
@@ -180,9 +219,11 @@ describe("scheduler-driven orchestrator", () => {
 
     const run = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "run.json"), "utf8"));
     const tasks = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "tasks.json"), "utf8"));
+    const contextPackages = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "context-packages.json"), "utf8"));
     expect(resumed.taskRun.status).toBe("COMPLETED");
     expect(run.status).toBe("completed");
     expect(tasks.every((task: { status: string }) => task.status === "completed")).toBe(true);
+    expect(contextPackages.length).toBeGreaterThanOrEqual(2);
   });
 
   it("refuses resume with pending approvals or terminal runs", async () => {

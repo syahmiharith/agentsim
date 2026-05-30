@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentActionRecord, AgentMessageRecord, Artifact, DomainPack, ValidationResult } from "../types.js";
+import type { AgentActionRecord, AgentMessageRecord, Artifact, ContextEvaluation, ContextPackage, DomainPack, ValidationResult } from "../types.js";
+import { validateContextPackage } from "./context.js";
 import { sha256 } from "./hash.js";
 
 const validAgentMessageTypes = new Set(["task.assignment", "artifact.handoff", "review.request"]);
@@ -134,7 +135,9 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   }
 
   const messageIds = await validateAgentMessages(input.finalPackageDir, artifactsById, agentIds, failures);
-  await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, failures);
+  const contextPackages = await validateContextPackages(input.finalPackageDir, failures);
+  await validateContextEvaluation(input.finalPackageDir, failures);
+  await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, contextPackages, failures);
 
   return {
     ok: failures.length === 0,
@@ -146,6 +149,7 @@ async function validateAgentActions(
   finalPackageDir: string,
   artifactsById: Map<string, Artifact>,
   messageIds: Set<string>,
+  contextPackages: ContextPackage[],
   failures: string[]
 ): Promise<void> {
   const actionPath = join(finalPackageDir, "trace", "agent-actions.json");
@@ -163,9 +167,23 @@ async function validateAgentActions(
   }
 
   const actionsByOutputArtifact = new Map<string, AgentActionRecord>();
+  const contextPackagesById = new Map(contextPackages.map((contextPackage) => [contextPackage.id, contextPackage]));
   for (const action of actions) {
     if (action.status !== "completed") {
       failures.push(`Agent action ${action.stepId} did not complete`);
+    }
+    const contextPackage = action.contextPackageId ? contextPackagesById.get(action.contextPackageId) : undefined;
+    if (!contextPackage) {
+      failures.push(`Agent action ${action.stepId} is missing contextPackageId`);
+    } else {
+      if (action.contextHash !== contextPackage.contextHash) {
+        failures.push(`Agent action ${action.stepId} contextHash does not match stored context package`);
+      }
+      for (const inputArtifactId of action.inputArtifactIds ?? []) {
+        if (!contextPackage.inputArtifactIds.includes(inputArtifactId)) {
+          failures.push(`Agent action ${action.stepId} input artifact ${inputArtifactId} is missing from context package`);
+        }
+      }
     }
     if (!Array.isArray(action.inputMessageIds) || action.inputMessageIds.length === 0) {
       failures.push(`Agent action ${action.stepId} is missing inputMessageIds`);
@@ -196,12 +214,81 @@ async function validateAgentActions(
     if (artifact.type !== action.outputType) {
       failures.push(`Agent action ${action.stepId} output type ${action.outputType} does not match artifact type ${artifact.type}`);
     }
+    if (contextPackage) {
+      if (artifact.lineage?.contextPackageId !== contextPackage.id) {
+        failures.push(`Artifact ${artifact.type} lineage is missing contextPackageId ${contextPackage.id}`);
+      }
+      if (artifact.lineage?.contextHash !== contextPackage.contextHash) {
+        failures.push(`Artifact ${artifact.type} lineage contextHash does not match context package`);
+      }
+    }
   }
 
   for (const artifact of artifactsById.values()) {
     if (!actionsByOutputArtifact.has(artifact.id)) {
       failures.push(`Artifact ${artifact.type} is missing completed agent action`);
     }
+  }
+}
+
+async function validateContextPackages(
+  finalPackageDir: string,
+  failures: string[]
+): Promise<ContextPackage[]> {
+  const contextPath = join(finalPackageDir, "trace", "context-packages.json");
+  if (!(await pathExists(contextPath))) {
+    return [];
+  }
+
+  let contextPackages: ContextPackage[];
+  try {
+    const parsed = JSON.parse(await readFile(contextPath, "utf8")) as { contextPackages?: ContextPackage[] };
+    contextPackages = parsed.contextPackages ?? [];
+  } catch {
+    failures.push("Context package trace is not valid JSON");
+    return [];
+  }
+
+  const seen = new Set<string>();
+  for (const contextPackage of contextPackages) {
+    if (seen.has(contextPackage.id)) {
+      failures.push(`Duplicate context package id: ${contextPackage.id}`);
+    }
+    seen.add(contextPackage.id);
+    const validation = validateContextPackage(contextPackage);
+    failures.push(...validation.failures);
+  }
+
+  return contextPackages;
+}
+
+async function validateContextEvaluation(finalPackageDir: string, failures: string[]): Promise<void> {
+  const evalPath = join(finalPackageDir, "trace", "context-eval.json");
+  if (!(await pathExists(evalPath))) {
+    return;
+  }
+
+  let evaluation: ContextEvaluation | undefined;
+  try {
+    const parsed = JSON.parse(await readFile(evalPath, "utf8")) as { evaluation?: ContextEvaluation };
+    evaluation = parsed.evaluation;
+  } catch {
+    failures.push("Context evaluation trace is not valid JSON");
+    return;
+  }
+
+  if (!evaluation) {
+    failures.push("Context evaluation trace is missing evaluation");
+    return;
+  }
+  if (!evaluation.requiredCoverageOk) {
+    failures.push("Context evaluation reports incomplete required coverage");
+  }
+  if (!evaluation.provenanceOk) {
+    failures.push("Context evaluation reports incomplete provenance");
+  }
+  for (const failure of evaluation.failures ?? []) {
+    failures.push(`Context evaluation failure: ${failure}`);
   }
 }
 
