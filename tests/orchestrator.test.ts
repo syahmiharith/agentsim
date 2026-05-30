@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 import { resumeOrchestrator, runOrchestrator } from "../src/orchestrator.js";
 import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "../src/core/repositories.js";
 import { ToolApprovalRequiredError } from "../src/core/tools.js";
+import { validateContextPackage } from "../src/core/context.js";
 import { MockModelProvider } from "../src/providers/mock-model-provider.js";
-import type { AgentStep, ValidationResult } from "../src/types.js";
+import type { AgentActionRecord, AgentStep, ContextPackage, ValidationResult } from "../src/types.js";
 
 describe("scheduler-driven orchestrator", () => {
   it("executes ready tasks in deterministic dependency order", async () => {
@@ -200,6 +201,8 @@ describe("scheduler-driven orchestrator", () => {
     expect(paused.taskRun.status).toBe("WAITING_HUMAN_APPROVAL");
 
     const runRoot = join(outputRoot, "resume-run");
+    const pausedContextPackages = JSON.parse(await readFile(join(runRoot, "state", "context-packages.json"), "utf8")) as ContextPackage[];
+    expect(pausedContextPackages.length).toBeGreaterThan(0);
     const approvalsRepo = new LocalApprovalsRepo(runRoot);
     const tasksRepo = new LocalTasksRepo(runRoot);
     const runsRepo = new LocalRunsRepo(runRoot);
@@ -236,13 +239,26 @@ describe("scheduler-driven orchestrator", () => {
 
     const run = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "run.json"), "utf8"));
     const tasks = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "tasks.json"), "utf8"));
-    const contextPackages = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "context-packages.json"), "utf8"));
+    const contextPackages = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "context-packages.json"), "utf8")) as ContextPackage[];
+    const traceContextPackages = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "context-packages.json"), "utf8")) as { contextPackages: ContextPackage[] };
+    const traceActions = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "agent-actions.json"), "utf8")) as { actions: AgentActionRecord[] };
+    const traceContextEval = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "context-eval.json"), "utf8")) as { evaluation: { requiredCoverageOk: boolean; provenanceOk: boolean; failures: string[] } };
     const traceApprovals = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "approvals.json"), "utf8"));
     expect(resumed.taskRun.status).toBe("COMPLETED");
     expect(resumed.domainSpec.appName).toBe("Persisted Resume Desk");
     expect(run.status).toBe("completed");
     expect(tasks.every((task: { status: string }) => task.status === "completed")).toBe(true);
-    expect(contextPackages.length).toBeGreaterThanOrEqual(2);
+    expect(contextPackages.length).toBeGreaterThan(pausedContextPackages.length);
+    const pausedContextPackageIds = new Set(pausedContextPackages.map((pkg) => pkg.id));
+    const completedActionContextPackageIds = new Set(traceActions.actions
+      .filter((action) => action.status === "completed")
+      .map((action) => action.contextPackageId)
+      .filter(Boolean));
+    expect([...pausedContextPackageIds].some((id) => completedActionContextPackageIds.has(id))).toBe(false);
+    expect(traceContextPackages.contextPackages.filter((pkg) => pausedContextPackageIds.has(pkg.id)).every((pkg) => validateContextPackage(pkg).ok)).toBe(true);
+    expect(traceContextEval.evaluation.requiredCoverageOk).toBe(true);
+    expect(traceContextEval.evaluation.provenanceOk).toBe(true);
+    expect(traceContextEval.evaluation.failures).toEqual([]);
     expect(traceApprovals.approvals.some((item: { id: string; status: string }) => item.id === approval.id && item.status === "approved")).toBe(true);
   });
 
