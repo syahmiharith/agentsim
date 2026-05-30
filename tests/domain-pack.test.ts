@@ -25,6 +25,8 @@ describe("softwareFreelancePack", () => {
     ]));
     expect(softwareFreelancePack.requiredTraceFiles).toEqual(expect.arrayContaining([
       "trace/events.jsonl",
+      "trace/agent-messages.json",
+      "trace/agent-actions.json",
       "trace/decisions.json",
       "trace/approvals.json",
       "trace/artifact-lineage.json"

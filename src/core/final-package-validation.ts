@@ -1,7 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Artifact, DomainPack, ValidationResult } from "../types.js";
+import type { AgentActionRecord, AgentMessageRecord, Artifact, DomainPack, ValidationResult } from "../types.js";
 import { sha256 } from "./hash.js";
+
+const validAgentMessageTypes = new Set(["task.assignment", "artifact.handoff", "review.request"]);
 
 export interface FinalPackageValidationInput {
   finalPackageDir: string;
@@ -13,6 +15,7 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   const failures: string[] = [];
   const agentIds = new Set(input.domainPack.agents.map((agent) => agent.id));
   const artifactIds = new Set(input.artifacts.map((artifact) => artifact.id));
+  const artifactsById = new Map(input.artifacts.map((artifact) => [artifact.id, artifact]));
   const seenTypes = new Set<string>();
   const duplicateTypes = new Set<string>();
   const seenFinalPackagePaths = new Set<string>();
@@ -130,10 +133,137 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
     }
   }
 
+  const messageIds = await validateAgentMessages(input.finalPackageDir, artifactsById, agentIds, failures);
+  await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, failures);
+
   return {
     ok: failures.length === 0,
     failures
   };
+}
+
+async function validateAgentActions(
+  finalPackageDir: string,
+  artifactsById: Map<string, Artifact>,
+  messageIds: Set<string>,
+  failures: string[]
+): Promise<void> {
+  const actionPath = join(finalPackageDir, "trace", "agent-actions.json");
+  if (!(await pathExists(actionPath))) {
+    return;
+  }
+
+  let actions: AgentActionRecord[];
+  try {
+    const parsed = JSON.parse(await readFile(actionPath, "utf8")) as { actions?: AgentActionRecord[] };
+    actions = parsed.actions ?? [];
+  } catch {
+    failures.push("Agent action trace is not valid JSON");
+    return;
+  }
+
+  const actionsByOutputArtifact = new Map<string, AgentActionRecord>();
+  for (const action of actions) {
+    if (action.status !== "completed") {
+      failures.push(`Agent action ${action.stepId} did not complete`);
+    }
+    if (!Array.isArray(action.inputMessageIds) || action.inputMessageIds.length === 0) {
+      failures.push(`Agent action ${action.stepId} is missing inputMessageIds`);
+    }
+    for (const messageId of action.inputMessageIds ?? []) {
+      if (!messageIds.has(messageId)) {
+        failures.push(`Agent action ${action.stepId} references unknown input message ${messageId}`);
+      }
+    }
+    if (!action.outputArtifactId) {
+      failures.push(`Agent action ${action.stepId} is missing outputArtifactId`);
+      continue;
+    }
+
+    if (actionsByOutputArtifact.has(action.outputArtifactId)) {
+      failures.push(`Duplicate agent action output artifact: ${action.outputArtifactId}`);
+    }
+    actionsByOutputArtifact.set(action.outputArtifactId, action);
+
+    const artifact = artifactsById.get(action.outputArtifactId);
+    if (!artifact) {
+      failures.push(`Agent action ${action.stepId} references unknown output artifact ${action.outputArtifactId}`);
+      continue;
+    }
+    if (artifact.ownerAgentId !== action.agentId) {
+      failures.push(`Agent action ${action.stepId} agent ${action.agentId} does not match artifact owner ${artifact.ownerAgentId}`);
+    }
+    if (artifact.type !== action.outputType) {
+      failures.push(`Agent action ${action.stepId} output type ${action.outputType} does not match artifact type ${artifact.type}`);
+    }
+  }
+
+  for (const artifact of artifactsById.values()) {
+    if (!actionsByOutputArtifact.has(artifact.id)) {
+      failures.push(`Artifact ${artifact.type} is missing completed agent action`);
+    }
+  }
+}
+
+async function validateAgentMessages(
+  finalPackageDir: string,
+  artifactsById: Map<string, Artifact>,
+  agentIds: Set<string>,
+  failures: string[]
+): Promise<Set<string>> {
+  const messagePath = join(finalPackageDir, "trace", "agent-messages.json");
+  const messageIds = new Set<string>();
+  if (!(await pathExists(messagePath))) {
+    return messageIds;
+  }
+
+  let messages: AgentMessageRecord[];
+  try {
+    const parsed = JSON.parse(await readFile(messagePath, "utf8")) as { messages?: AgentMessageRecord[] };
+    messages = parsed.messages ?? [];
+  } catch {
+    failures.push("Agent message trace is not valid JSON");
+    return messageIds;
+  }
+
+  for (const message of messages) {
+    const messageId = typeof message.id === "string" && message.id.length > 0 ? message.id : "unknown";
+    if (messageIds.has(message.id)) {
+      failures.push(`Duplicate agent message id: ${messageId}`);
+    }
+    messageIds.add(message.id);
+
+    if (!validAgentMessageTypes.has(message.type)) {
+      failures.push(`Agent message ${messageId} has unknown type ${message.type}`);
+    }
+    if (message.from !== "orchestrator" && !agentIds.has(message.from)) {
+      failures.push(`Agent message ${messageId} has unknown sender ${message.from}`);
+    }
+    if (!agentIds.has(message.to)) {
+      failures.push(`Agent message ${messageId} has unknown recipient ${message.to}`);
+    }
+    if (typeof message.question !== "string" || !message.question.trim()) {
+      failures.push(`Agent message ${messageId} is missing question`);
+    }
+    if (typeof message.expectedOutput !== "string" || !message.expectedOutput.trim()) {
+      failures.push(`Agent message ${messageId} is missing expectedOutput`);
+    }
+    if (message.artifactId) {
+      const artifact = artifactsById.get(message.artifactId);
+      if (!artifact) {
+        failures.push(`Agent message ${messageId} references unknown artifact ${message.artifactId}`);
+      } else {
+        if (message.artifactType !== artifact.type) {
+          failures.push(`Agent message ${messageId} artifactType ${message.artifactType ?? "missing"} does not match artifact ${artifact.type}`);
+        }
+        if (message.from !== "orchestrator" && artifact.ownerAgentId !== message.from) {
+          failures.push(`Agent message ${messageId} sender ${message.from} does not own artifact ${message.artifactId}`);
+        }
+      }
+    }
+  }
+
+  return messageIds;
 }
 
 async function pathExists(path: string): Promise<boolean> {

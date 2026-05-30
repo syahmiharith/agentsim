@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { FileArtifactStore } from "./core/artifacts.js";
@@ -9,7 +10,7 @@ import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
 import { getAgent } from "./agents/agents.js";
 import { agentSteps } from "./agents/steps.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
-import type { AgentContext, Approval, Artifact, ArtifactType, Decision, ModelProvider, RunSummary, TaskRun } from "./types.js";
+import type { AgentActionRecord, AgentContext, AgentMessageRecord, Approval, Artifact, ArtifactType, Decision, ModelProvider, RunSummary, TaskRun } from "./types.js";
 
 export interface RunDemoOptions {
   goal: string;
@@ -35,6 +36,8 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
   const eventStore = new JsonlEventStore(runId, join(workspace.finalPackageDir, "trace", "events.jsonl"));
   const artifactStore = new FileArtifactStore(workspace);
   const decisions: Decision[] = [];
+  const agentActions: AgentActionRecord[] = [];
+  const agentMessages: AgentMessageRecord[] = [];
   const domainPack = softwareFreelancePack;
   const domainSpec = domainPack.inferDomainSpec(safeGoal);
   const taskRun: TaskRun = {
@@ -129,37 +132,125 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
         throw new Error(`Agent step ${step.id} is missing inputs: ${missingInputs.join(", ")}`);
       }
 
+      const inputArtifactIds = step.requiredInputs.map((type) => artifactsByType[type]?.id).filter(isString);
+      const currentMessages = createAgentMessages({
+        runId,
+        stepId: step.id,
+        action: step.action,
+        to: step.ownerAgentId,
+        outputType: step.outputType,
+        reviewRequired: step.reviewRequired,
+        inputArtifacts: step.requiredInputs.map((type) => artifactsByType[type]).filter(isArtifact)
+      });
+      agentMessages.push(...currentMessages);
+      context.currentMessages = currentMessages;
+
+      for (const message of currentMessages) {
+        await eventStore.append({
+          level: "info",
+          name: "agent.message.sent",
+          agentId: message.to,
+          artifactId: message.artifactId,
+          message: `${message.from} sent ${message.type} to ${message.to}.`,
+          data: {
+            messageId: message.id,
+            type: message.type,
+            from: message.from,
+            to: message.to,
+            stepId: message.stepId,
+            artifactType: message.artifactType,
+            expectedOutput: message.expectedOutput
+          }
+        });
+      }
+
       await eventStore.append({
         level: "info",
-        name: "agent.step.started",
+        name: "agent.action.started",
         agentId: step.ownerAgentId,
-        message: `${getAgent(step.ownerAgentId).displayName} started ${step.outputType}.`,
+        message: `${getAgent(step.ownerAgentId).displayName} started ${step.action}.`,
         data: {
           stepId: step.id,
+          action: step.action,
           outputType: step.outputType,
           requiredInputs: step.requiredInputs,
           reviewRequired: step.reviewRequired
         }
       });
 
-      const stepResult = await step.execute(context);
-      const inputArtifactIds = step.requiredInputs.map((type) => artifactsByType[type]?.id).filter(isString);
-      const artifact = await createArtifact({
-        artifactStore,
-        eventStore,
-        goal: safeGoal,
+      const actionRecord: AgentActionRecord = {
+        id: randomUUID(),
+        runId,
         stepId: step.id,
-        type: step.outputType,
-        ownerAgentId: step.ownerAgentId,
-        content: stepResult.content,
-        workspaceRelativePath: stepResult.workspaceRelativePath,
-        finalPackagePath: stepResult.finalPackagePath,
+        agentId: step.ownerAgentId,
+        action: step.action,
+        outputType: step.outputType,
+        inputMessageIds: currentMessages.map((message) => message.id),
         inputArtifactIds,
-        status: stepResult.status,
-        reviewStatus: stepResult.reviewStatus,
-        approvalStatus: stepResult.approvalStatus
-      });
-      artifactsByType[step.outputType] = artifact;
+        status: "started",
+        modelMode: options.modelProvider.mode,
+        provider: options.modelProvider.name,
+        reviewRequired: step.reviewRequired,
+        startedAt: new Date().toISOString()
+      };
+      agentActions.push(actionRecord);
+
+      try {
+        const stepResult = await step.execute(context);
+        const artifact = await createArtifact({
+          artifactStore,
+          eventStore,
+          goal: safeGoal,
+          stepId: step.id,
+          type: step.outputType,
+          ownerAgentId: step.ownerAgentId,
+          content: stepResult.content,
+          workspaceRelativePath: stepResult.workspaceRelativePath,
+          finalPackagePath: stepResult.finalPackagePath,
+          inputArtifactIds,
+          status: stepResult.status,
+          reviewStatus: stepResult.reviewStatus,
+          approvalStatus: stepResult.approvalStatus
+        });
+        artifactsByType[step.outputType] = artifact;
+        actionRecord.status = "completed";
+        actionRecord.completedAt = new Date().toISOString();
+        actionRecord.outputArtifactId = artifact.id;
+        actionRecord.outputSource = stepResult.outputSource;
+        actionRecord.model = stepResult.model;
+        await eventStore.append({
+          level: "info",
+          name: "agent.action.completed",
+          agentId: step.ownerAgentId,
+          artifactId: artifact.id,
+          message: `${getAgent(step.ownerAgentId).displayName} completed ${step.action}.`,
+          data: {
+            stepId: step.id,
+            action: step.action,
+            outputType: step.outputType,
+            outputSource: stepResult.outputSource,
+            model: stepResult.model,
+            summary: stepResult.actionSummary
+          }
+        });
+      } catch (error) {
+        actionRecord.status = "failed";
+        actionRecord.completedAt = new Date().toISOString();
+        actionRecord.error = error instanceof Error ? redactSecrets(error.message) : "Unknown agent action failure.";
+        await eventStore.append({
+          level: "error",
+          name: "agent.action.failed",
+          agentId: step.ownerAgentId,
+          message: `${getAgent(step.ownerAgentId).displayName} failed ${step.action}.`,
+          data: {
+            stepId: step.id,
+            action: step.action,
+            outputType: step.outputType,
+            error: actionRecord.error
+          }
+        });
+        throw error;
+      }
     }
 
     for (const artifact of artifactStore.list()) {
@@ -195,6 +286,8 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     await writeFile(join(workspace.finalPackageDir, "trace", "domain-spec.json"), JSON.stringify(domainSpec, null, 2), "utf8");
     await writeFile(join(workspace.finalPackageDir, "trace", "decisions.json"), JSON.stringify({ decisions }, null, 2), "utf8");
     await writeFile(join(workspace.finalPackageDir, "trace", "approvals.json"), JSON.stringify({ approvals }, null, 2), "utf8");
+    await writeFile(join(workspace.finalPackageDir, "trace", "agent-messages.json"), JSON.stringify({ messages: agentMessages }, null, 2), "utf8");
+    await writeFile(join(workspace.finalPackageDir, "trace", "agent-actions.json"), JSON.stringify({ actions: agentActions }, null, 2), "utf8");
     await artifactStore.exportLineage(join(workspace.finalPackageDir, "trace", "artifact-lineage.json"));
 
     const validationResult = await validateFinalPackage({
@@ -325,6 +418,54 @@ async function createArtifact(input: {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isArtifact(value: Artifact | undefined): value is Artifact {
+  return Boolean(value);
+}
+
+function createAgentMessages(input: {
+  runId: string;
+  stepId: string;
+  action: string;
+  to: AgentMessageRecord["to"];
+  outputType: ArtifactType;
+  reviewRequired: boolean;
+  inputArtifacts: Artifact[];
+}): AgentMessageRecord[] {
+  const now = new Date().toISOString();
+
+  if (input.inputArtifacts.length === 0) {
+    return [{
+      id: randomUUID(),
+      runId: input.runId,
+      type: "task.assignment",
+      from: "orchestrator",
+      to: input.to,
+      stepId: input.stepId,
+      question: `Produce ${input.outputType} for the current client goal.`,
+      expectedOutput: input.action,
+      createdAt: now
+    }];
+  }
+
+  return input.inputArtifacts.map((artifact) => ({
+    id: randomUUID(),
+    runId: input.runId,
+    type: input.reviewRequired ? "review.request" : "artifact.handoff",
+    from: artifact.ownerAgentId,
+    to: input.to,
+    stepId: input.stepId,
+    artifactId: artifact.id,
+    artifactType: artifact.type,
+    question: input.reviewRequired
+      ? `Review ${artifact.type} for blockers before ${input.action}.`
+      : `Use ${artifact.type} as input for ${input.action}.`,
+    expectedOutput: input.reviewRequired
+      ? "List blocking issues only, or pass the artifact if acceptable."
+      : `Produce ${input.outputType} using the provided artifact context.`,
+    createdAt: now
+  }));
 }
 
 function createRunId(): string {

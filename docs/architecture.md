@@ -130,10 +130,14 @@ Artifact expectations:
 - every artifact has a content hash
 - every artifact records input artifact lineage
 - exported package paths match the domain pack manifest
+- every produced artifact is tied to a completed agent action
+- agents communicate through structured task assignments, artifact handoffs, and review requests
 
 Trace expectations:
 
 - `trace/events.jsonl` records important run events
+- `trace/agent-messages.json` records bounded agent communication, including sender, recipient, related artifact, question, and expected output
+- `trace/agent-actions.json` records each agent action, input artifact IDs, output artifact ID, model/template source, and completion status
 - `trace/decisions.json` records system and human decisions
 - `trace/approvals.json` records approval state
 - `trace/domain-spec.json` records inferred domain behavior

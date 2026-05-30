@@ -41,6 +41,8 @@ describe("demo workflow", () => {
       "review/code-review.md",
       "review/known-issues.md",
       "trace/events.jsonl",
+      "trace/agent-messages.json",
+      "trace/agent-actions.json",
       "trace/approvals.json",
       "trace/decisions.json",
       "trace/domain-spec.json",
@@ -59,7 +61,19 @@ describe("demo workflow", () => {
 
     const events = await readFile(join(result.finalPackageDir, "trace", "events.jsonl"), "utf8");
     expect(events).toContain("run.completed");
-    expect(events).toContain("agent.step.started");
+    expect(events).toContain("agent.message.sent");
+    expect(events).toContain("agent.action.started");
+    expect(events).toContain("agent.action.completed");
+
+    const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
+    expect(agentActions.actions).toHaveLength(result.artifacts.length);
+    expect(agentActions.actions.every((action: { status: string; outputArtifactId?: string }) => action.status === "completed" && Boolean(action.outputArtifactId))).toBe(true);
+
+    const agentMessages = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-messages.json"), "utf8"));
+    expect(agentMessages.messages.length).toBeGreaterThan(result.artifacts.length);
+    expect(agentActions.actions.every((action: { inputMessageIds: string[] }) => action.inputMessageIds.length > 0)).toBe(true);
+    expect(agentMessages.messages.some((message: { type: string }) => message.type === "artifact.handoff")).toBe(true);
+    expect(agentMessages.messages.some((message: { type: string }) => message.type === "review.request")).toBe(true);
 
     const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
     expect(appReadme).toContain("pnpm dev:api");
@@ -154,12 +168,19 @@ describe("demo workflow", () => {
       "agent-step:delivery-user-guide"
     ]));
     expect(provider.requests).toHaveLength(17);
+    expect(provider.requests.find((request) => request.purpose === "agent-step:planning-requirements")?.prompt).toContain("Structured messages for this agent action");
 
     const requirements = await readFile(join(result.finalPackageDir, "planning", "requirements.md"), "utf8");
     expect(requirements).toContain("Live artifact for agent-step:planning-requirements");
 
     const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
     expect(appReadme).toContain("pnpm dev:api");
+
+    const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
+    const modelActions = agentActions.actions.filter((action: { outputSource?: string }) => action.outputSource === "model");
+    const templateActions = agentActions.actions.filter((action: { outputSource?: string }) => action.outputSource === "template");
+    expect(modelActions).toHaveLength(16);
+    expect(templateActions.map((action: { stepId: string }) => action.stepId)).toEqual(["builder-app"]);
   });
 
   it("redacts secrets from workflow state, traces, artifacts, and provider prompts", async () => {

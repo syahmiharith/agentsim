@@ -45,7 +45,7 @@ Current capabilities:
 - Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
 - Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
 - Mock and Chat Completions-compatible model provider boundary.
-- Artifact lineage, decision logs, approval records, and event trace.
+- Structured agent messages, agent action records, artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
 - Final package validation and `run-summary.json`.
 
@@ -67,7 +67,7 @@ Build:
 Acceptance:
 
 - One command creates a complete delivery package.
-- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, events, decisions, approvals, lineage, and run summary.
+- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, events, decisions, approvals, lineage, and run summary.
 - The code still defaults to local filesystem and mock mode without keys.
 
 Do not build:

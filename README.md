@@ -95,6 +95,8 @@ outputs/{runId}/final-package/
 |   +-- known-issues.md
 +-- trace/
     +-- events.jsonl
+    +-- agent-messages.json
+    +-- agent-actions.json
     +-- decisions.json
     +-- artifact-lineage.json
 ```
@@ -107,6 +109,8 @@ For the flower-company inventory example, a useful run should produce artifacts 
 * `technical/architecture.md` explaining the simple local app structure and data model
 * `review/qa-report.md` checking whether the generated package matches the scoped requirements
 * `trace/events.jsonl` showing the workflow events that led to the final package
+* `trace/agent-messages.json` showing structured task assignments, handoffs, and review requests between agents
+* `trace/agent-actions.json` showing each role-owned action, input artifacts, output artifact, model/source, and status
 
 ## Design Principles
 

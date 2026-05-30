@@ -5,6 +5,10 @@ export type ReviewStatus = "not_required" | "pending" | "passed" | "failed";
 export type ApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
 export type EventLevel = "info" | "warn" | "error";
 export type ModelMode = "mock" | "live";
+export type AgentActionStatus = "started" | "completed" | "failed";
+export type AgentOutputSource = "template" | "model";
+export type AgentMessageSender = AgentRole | "orchestrator";
+export type AgentMessageType = "task.assignment" | "artifact.handoff" | "review.request";
 
 export type TaskRunStatus =
   | "PENDING"
@@ -61,6 +65,41 @@ export interface Agent {
   id: AgentRole;
   displayName: string;
   mission: string;
+}
+
+export interface AgentActionRecord {
+  id: string;
+  runId: string;
+  stepId: string;
+  agentId: AgentRole;
+  action: string;
+  outputType: ArtifactType;
+  inputMessageIds: string[];
+  inputArtifactIds: string[];
+  outputArtifactId?: string;
+  status: AgentActionStatus;
+  modelMode: ModelMode;
+  provider: string;
+  model?: string;
+  outputSource?: AgentOutputSource;
+  reviewRequired: boolean;
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface AgentMessageRecord {
+  id: string;
+  runId: string;
+  type: AgentMessageType;
+  from: AgentMessageSender;
+  to: AgentRole;
+  stepId: string;
+  artifactId?: string;
+  artifactType?: ArtifactType;
+  question: string;
+  expectedOutput: string;
+  createdAt: string;
 }
 
 export interface TaskRun {
@@ -239,6 +278,7 @@ export interface AgentContext {
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
+  currentMessages?: AgentMessageRecord[];
   appValidation?: { ok: boolean; message: string };
 }
 
@@ -249,11 +289,15 @@ export interface AgentStepResult {
   status?: ArtifactStatus;
   reviewStatus?: ReviewStatus;
   approvalStatus?: ApprovalStatus;
+  outputSource?: AgentOutputSource;
+  model?: string;
+  actionSummary?: string;
 }
 
 export interface AgentStep {
   id: string;
   ownerAgentId: AgentRole;
+  action: string;
   outputType: ArtifactType;
   requiredInputs: ArtifactType[];
   reviewRequired: boolean;
