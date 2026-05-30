@@ -30,6 +30,24 @@ describe("CLI parsing", () => {
     expect(options.goal).toBe("test-run");
   });
 
+  it("parses inspection commands", () => {
+    const options = parseArgs(["inspect", "test-run", "--out-dir", "custom-outputs"]);
+    expect(options.command).toBe("inspect");
+    expect(options.runId).toBe("test-run");
+    expect(options.outputRoot).toBe("custom-outputs");
+  });
+
+  it("parses approval and resume commands", () => {
+    const approval = parseArgs(["approve", "test-run", "approval-1"]);
+    expect(approval.command).toBe("approve");
+    expect(approval.runId).toBe("test-run");
+    expect(approval.approvalId).toBe("approval-1");
+
+    const resume = parseArgs(["resume", "test-run"]);
+    expect(resume.command).toBe("resume");
+    expect(resume.runId).toBe("test-run");
+  });
+
   it("returns no goal when goal is missing", () => {
     const options = parseArgs(["run", "--mock"]);
     expect(options.goal).toBeUndefined();

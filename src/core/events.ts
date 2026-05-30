@@ -25,3 +25,18 @@ export class JsonlEventStore implements EventStore {
     return event;
   }
 }
+
+export class CompositeEventStore implements EventStore {
+  constructor(private readonly stores: EventStore[]) {}
+
+  async append(input: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event> {
+    const [primary, ...rest] = this.stores;
+    if (!primary) {
+      throw new Error("CompositeEventStore requires at least one event store.");
+    }
+
+    const event = await primary.append(input);
+    await Promise.all(rest.map((store) => store.append(input)));
+    return event;
+  }
+}

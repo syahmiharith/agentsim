@@ -31,13 +31,16 @@ Current capability:
 * run a local CLI workflow from a high-level client request
 * generate planning, technical, review, client handoff, trace, and app prototype files
 * run in deterministic mock mode without provider keys
+* persist run, task, artifact, event, message, and approval state under each run
+* inspect completed runs from the CLI
 * use a model-agnostic Chat Completions-compatible provider in live mode when configured
 
 Current limitations:
 
 * generated apps are simple prototypes and still need human review before client delivery
 * the workflow is tuned for the first software-freelance demo, not arbitrary domains
-* approvals, workspace execution, and provider routing are still early
+* approvals, workspace execution, command execution, and provider routing are still early
+* the task graph is local-first and sequential; it is not a distributed scheduler
 * no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
@@ -181,6 +184,40 @@ If no live key is configured and `--live` is not passed, Agentsim falls back to 
 
 Agentsim owns the runtime orchestration, artifact graph, review state, event trace, and final package validation. Live providers only implement the small `ModelProvider.generate()` boundary.
 
+## Inspect A Run
+
+Each run now writes internal state beside the final package:
+
+```text
+outputs/{runId}/state/
++-- run.json
++-- tasks.json
++-- messages.json
++-- events.jsonl
++-- artifacts.json
++-- approvals.json
+```
+
+Use the inspection commands to read that state:
+
+```bash
+pnpm agentsim inspect <runId>
+pnpm agentsim tasks <runId>
+pnpm agentsim events <runId>
+pnpm agentsim artifacts <runId>
+pnpm agentsim approvals <runId>
+```
+
+Approval records can be resolved locally:
+
+```bash
+pnpm agentsim approve <runId> <approvalId>
+pnpm agentsim reject <runId> <approvalId>
+pnpm agentsim resume <runId>
+```
+
+The current mock workflow only uses safe default operations, so completed mock runs usually have auto-approved artifact records rather than pending dangerous tool approvals.
+
 ## Development
 
 ```bash
@@ -192,10 +229,11 @@ pnpm build
 Useful entry points:
 
 * `src/cli.ts` - CLI command surface
-* `src/workflow.ts` - current end-to-end workflow
+* `src/workflow.ts` - current end-to-end workflow and compatibility wrapper
+* `src/orchestrator.ts` - orchestration entry points for task-based execution
 * `src/types.ts` - core contracts
 * `src/agents/` - role definitions and artifact-producing step registry
-* `src/core/` - artifacts, events, hashing, redaction, and workspace behavior
+* `src/core/` - artifacts, events, hashing, redaction, path safety, repositories, scheduler, tools, and workspace behavior
 * `src/providers/` - model provider boundary
 * `src/templates/` - generated delivery package templates
 * `tests/` - workflow, CLI, hashing, and redaction coverage
@@ -207,6 +245,8 @@ Agentsim is currently built around these concepts:
 * `Agent`
 * `AgentStep`
 * `TaskRun`
+* `Run`
+* `Task`
 * `Artifact`
 * `Workspace`
 * `Decision`
@@ -222,6 +262,8 @@ Planned contracts include:
 * `ModelProvider`
 * `ArtifactStore`
 * `EventStore`
+
+The current orchestrator foundation compiles the existing `AgentStep` registry into persisted tasks, marks dependency-ready tasks, records task lifecycle events, and keeps the existing final package contract intact. Tools execute through permission-aware wrappers, with dangerous actions requiring an approval path before execution.
 
 The current implementation is deliberately thin. The priority is to make the software-delivery workflow useful before expanding the platform surface area.
 

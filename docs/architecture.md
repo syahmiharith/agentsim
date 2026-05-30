@@ -10,8 +10,11 @@ The implementation is intentionally simple. Keep the current CLI vertical slice 
 CLI
 -> workflow
 -> domain pack
+-> task compiler
+-> scheduler
 -> model provider
 -> artifact store
+-> state repositories
 -> workspace driver
 -> final package
 -> validation
@@ -26,6 +29,7 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | --- | --- |
 | `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, and `tui` command parsing and provider selection. |
 | `src/workflow.ts` | Coordinates the current end-to-end run from goal to final package. |
+| `src/orchestrator.ts` | Exposes task-oriented orchestration entry points used as the runtime foundation evolves. |
 | `src/types.ts` | Holds core contracts used across the CLI, workflow, artifacts, events, and providers. |
 | `src/agents/` | Defines the current software-freelance role set and artifact-producing step registry. |
 | `src/domain/` | Defines the software-freelance domain pack and deterministic domain-spec inference. |
@@ -33,6 +37,12 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | `src/core/artifacts.ts` | Writes artifacts, content hashes, status metadata, and lineage. |
 | `src/core/events.ts` | Writes redacted JSONL event traces. |
 | `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, and lineage. |
+| `src/core/paths.ts` | Prevents absolute-path use and workspace escape for relative path operations. |
+| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, messages, events, and approvals. |
+| `src/core/scheduler.ts` | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets. |
+| `src/core/state-machines.ts` | Validates allowed run and task status transitions. |
+| `src/core/task-compiler.ts` | Converts the existing `AgentStep` registry into a deterministic task graph. |
+| `src/core/tools.ts` | Wraps file, artifact, command, and approval tools with risk-aware execution rules. |
 | `src/core/workspace.ts` | Provides the local filesystem workspace driver. |
 | `src/providers/` | Provides mock and Chat Completions-compatible model providers. |
 | `src/tui/run-inspector.ts` | Inspects completed runs from local outputs. |
@@ -46,6 +56,8 @@ The public architecture is built around these contracts:
 Agent
 AgentStep
 TaskRun
+Run
+Task
 Artifact
 Workspace
 Decision
@@ -83,22 +95,41 @@ Provider selection is CLI-level:
 
 The CLI should remain a thin adapter. Product behavior belongs in workflow, domain, core, template, and provider modules.
 
+Additional local inspection commands read persisted state:
+
+```bash
+pnpm agentsim inspect <runId>
+pnpm agentsim events <runId>
+pnpm agentsim artifacts <runId>
+pnpm agentsim tasks <runId>
+pnpm agentsim approvals <runId>
+pnpm agentsim approve <runId> <approvalId>
+pnpm agentsim reject <runId> <approvalId>
+pnpm agentsim resume <runId>
+```
+
 ## Workflow Layer
 
-`src/workflow.ts` currently owns the end-to-end software-freelance demo run.
+`src/workflow.ts` currently owns the end-to-end software-freelance demo run and mirrors state into the local repository layout.
 
 Main responsibilities:
 
 - create a local workspace
 - create event and artifact stores
+- create a persisted run record
+- compile `AgentStep` entries into persisted tasks
+- mark dependency-ready tasks before execution
 - infer a `DomainSpec` through the domain pack
 - record provider and domain decisions
 - execute the artifact-producing agent step registry
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
 - validate package completeness
+- update run and task state
 - write `trace/run-summary.json`
 - return run metadata to the CLI
+
+The first orchestration version remains sequential so the final package stays compatible. The scheduler and repositories are intentionally separate so later work can replace the static loop without changing the artifact contract.
 
 Keep workflow changes narrowly scoped. If behavior becomes reusable across future workflows, extract a small helper or interface only when it removes real duplication.
 
@@ -146,6 +177,20 @@ Trace expectations:
 
 Event data and messages must be redacted before writing.
 
+Internal state is persisted under:
+
+```text
+outputs/{runId}/state/
++-- run.json
++-- tasks.json
++-- messages.json
++-- events.jsonl
++-- artifacts.json
++-- approvals.json
+```
+
+The `state/` files are for local resume, inspection, approvals, and scheduler state. The `final-package/trace/` files remain the reviewer-facing debug output.
+
 ## Workspace Layer
 
 The current workspace driver is `LocalFilesystemWorkspaceDriver`.
@@ -158,7 +203,21 @@ It supports:
 - list workspace files
 - copy generated directories into the final package
 
+All relative workspace and artifact paths go through `safeJoin()`. Absolute paths are rejected when a relative path is expected, `..` escape attempts are rejected, and resolved targets must stay inside the workspace or final-package root.
+
 `WorkspaceDriver.runCommand` exists as an optional interface contract for the local execution milestone. Do not add Docker, remote VM, or cloud execution until local filesystem execution proves the need.
+
+## Tools And Approvals
+
+The risk-aware tool runtime defines `read_file`, `write_file`, `list_files`, `create_artifact`, `run_command`, and `ask_human`.
+
+- Safe file tools are contained to the workspace.
+- `run_command` is dangerous and approval-required.
+- In mock mode, command execution remains disabled unless explicitly allowed.
+- Approval-required tools create or require approval state instead of silently executing.
+- Every tool call appends a `tool.called` event.
+
+Approval commands operate on local state only. They do not send emails, deploy code, charge payments, or contact external services.
 
 ## Provider Layer
 

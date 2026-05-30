@@ -86,6 +86,16 @@ describe("demo workflow", () => {
     expect(runSummary.status).toBe("COMPLETED");
     expect(runSummary.validationResult.ok).toBe(true);
     expect(runSummary.artifactCount).toBe(result.artifacts.length);
+
+    const stateRun = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "run.json"), "utf8"));
+    const stateTasks = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "tasks.json"), "utf8"));
+    const stateArtifacts = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "artifacts.json"), "utf8"));
+    const stateEvents = await readFile(join(outputRoot, "test-run", "state", "events.jsonl"), "utf8");
+    expect(stateRun.status).toBe("completed");
+    expect(stateTasks.every((task: { status: string; attempts: number }) => task.status === "completed" && task.attempts === 1)).toBe(true);
+    expect(stateArtifacts).toHaveLength(result.artifacts.length);
+    expect(stateEvents).toContain("task.started");
+    expect(stateEvents).toContain("task.completed");
   });
 
   it("creates prompt-specific docs and app files for a barber booking prompt", async () => {

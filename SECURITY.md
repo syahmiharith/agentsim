@@ -86,6 +86,27 @@ Generated outputs are ignored because they can contain private prompts, provider
 
 Private strategy and prompt files should stay in ignored directories. If a private file was accidentally committed, adding it to `.gitignore` is not enough; remove it from the public branch and consider history cleanup if the content is sensitive.
 
+## Workspace Path Safety
+
+Workspace and artifact paths must stay contained inside the run directory.
+
+- Use the shared safe path helper for relative workspace and final-package paths.
+- Reject absolute paths when a relative path is expected.
+- Reject `..` traversal that resolves outside the workspace root.
+- Do not delete or copy directories unless both source and target are inside the created run root.
+
+Generated state lives under `outputs/{runId}/state/` and generated package traces live under `outputs/{runId}/final-package/trace/`. Both are local outputs and remain ignored.
+
+## Tool And Approval Safety
+
+Tools must execute through permission-aware wrappers.
+
+- `read_file`, `write_file`, and `list_files` are contained to the workspace.
+- `create_artifact` must use the artifact store and path containment.
+- `run_command` is dangerous and approval-required.
+- In mock mode, command execution is disabled unless a caller explicitly allows it.
+- `ask_human` creates an approval path instead of silently approving risky work.
+
 ## Dependency and Generated Code Review
 
 Dependency updates and generated app templates should be reviewed for:

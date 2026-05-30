@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Artifact, ArtifactStore, CreateArtifactInput, Workspace } from "../types.js";
 import { sha256 } from "./hash.js";
+import { assertPathInside, safeJoin } from "./paths.js";
 
 export class FileArtifactStore implements ArtifactStore {
   private readonly artifacts: Artifact[] = [];
@@ -11,7 +12,8 @@ export class FileArtifactStore implements ArtifactStore {
 
   async createMarkdown(input: CreateArtifactInput): Promise<Artifact> {
     const now = new Date().toISOString();
-    const workspacePath = join(this.workspace.workspaceDir, input.workspaceRelativePath);
+    const workspacePath = safeJoin(this.workspace.workspaceDir, input.workspaceRelativePath);
+    safeJoin(this.workspace.finalPackageDir, input.finalPackagePath);
     await mkdir(dirname(workspacePath), { recursive: true });
     await writeFile(workspacePath, input.content, "utf8");
 
@@ -42,6 +44,7 @@ export class FileArtifactStore implements ArtifactStore {
   }
 
   async exportLineage(targetPath: string): Promise<void> {
+    assertPathInside(this.workspace.rootDir, targetPath, "lineage export path");
     await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, JSON.stringify({ artifacts: this.artifacts }, null, 2), "utf8");
   }

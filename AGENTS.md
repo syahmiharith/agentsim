@@ -83,6 +83,14 @@ pnpm demo "Build an inventory request system for a flower company" --mock
 pnpm agentsim run "Build an inventory request system for a flower company" --mock
 pnpm agentsim dashboard <runId>
 pnpm agentsim tui <runId>
+pnpm agentsim inspect <runId>
+pnpm agentsim events <runId>
+pnpm agentsim artifacts <runId>
+pnpm agentsim tasks <runId>
+pnpm agentsim approvals <runId>
+pnpm agentsim approve <runId> <approvalId>
+pnpm agentsim reject <runId> <approvalId>
+pnpm agentsim resume <runId>
 ```
 
 Maintainer-local checks are private evidence. Do not publish, document, or commit their outputs until the maintainer intentionally chooses what to share.

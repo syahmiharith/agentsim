@@ -42,8 +42,14 @@ pnpm agentsim run "Build an inventory request system for a flower company" --moc
 Current capabilities:
 
 - TypeScript CLI and local filesystem workspace.
-- Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
+- Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Run`, `Task`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
 - Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
+- Deterministic task graph compilation from the current `AgentStep` registry.
+- Local run, task, artifact, message, event, and approval state persistence.
+- Scheduler helpers for dependency-ready, blocked, failed, and terminal task state.
+- State transition helpers for run and task lifecycles.
+- Risk-aware local tool wrappers for workspace files, artifacts, commands, and human approval requests.
+- CLI inspection commands for runs, events, artifacts, tasks, and approvals.
 - Mock and Chat Completions-compatible model provider boundary.
 - Structured agent messages, agent action records, artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
@@ -60,14 +66,18 @@ Build:
 - Keep `agentsim run` as the canonical command while preserving `pnpm demo` as a local shortcut.
 - Keep `Organization`, `Project`, and `DomainPack` as thin core contracts.
 - Keep `AgentStep` focused on artifact production instead of generic agent chat.
+- Keep compiled `Task` state aligned with the existing `AgentStep` registry until the orchestrator fully replaces the static loop.
 - Keep the software-freelance workflow represented by `software-freelance-pack`.
 - Strengthen required artifact validation for final-package completeness.
 - Keep `run-summary.json` accurate with run status, package path, artifact count, validation result, and failures.
+- Keep `state/` files local and ignored as generated output.
 
 Acceptance:
 
 - One command creates a complete delivery package.
 - Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, events, decisions, approvals, lineage, and run summary.
+- Every run has persisted run, task, artifact, message, event, and approval state.
+- Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim events`, `agentsim artifacts`, and `agentsim approvals`.
 - The code still defaults to local filesystem and mock mode without keys.
 
 Do not build:

@@ -9,6 +9,12 @@ export type AgentActionStatus = "started" | "completed" | "failed";
 export type AgentOutputSource = "template" | "model";
 export type AgentMessageSender = AgentRole | "orchestrator";
 export type AgentMessageType = "task.assignment" | "artifact.handoff" | "review.request";
+export type RunStatus = "created" | "planning" | "running" | "reviewing" | "blocked" | "waiting_for_approval" | "completed" | "failed" | "cancelled";
+export type TaskStatus = "pending" | "ready" | "running" | "blocked" | "needs_review" | "waiting_for_approval" | "completed" | "failed" | "cancelled";
+export type TaskKind = "artifact_generation" | "app_generation" | "review" | "fix" | "approval" | "delivery";
+export type ToolRiskLevel = "safe" | "medium" | "dangerous";
+export type ApprovalRiskLevel = "low" | "medium" | "high";
+export type ReviewVerdict = "pass" | "revise" | "fail";
 
 export type TaskRunStatus =
   | "PENDING"
@@ -113,6 +119,38 @@ export interface TaskRun {
   outputDir: string;
 }
 
+export interface Run {
+  id: string;
+  userGoal: string;
+  status: RunStatus;
+  modelMode: ModelMode;
+  outputRoot: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  failureReason?: string;
+}
+
+export interface Task {
+  id: string;
+  runId: string;
+  title: string;
+  description: string;
+  kind: TaskKind;
+  assignedAgentId: AgentRole;
+  status: TaskStatus;
+  dependsOn: string[];
+  requiredArtifactTypes: ArtifactType[];
+  outputArtifactType?: ArtifactType;
+  attempts: number;
+  maxAttempts: number;
+  reviewCycle?: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  failureReason?: string;
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -167,11 +205,16 @@ export interface Decision {
 export interface Approval {
   id: string;
   runId: string;
-  artifactId: string;
+  artifactId?: string;
+  taskId?: string;
+  requestedBy?: string;
+  action?: string;
+  riskLevel?: ApprovalRiskLevel;
   requestedAt: string;
-  resolvedAt: string;
+  createdAt?: string;
+  resolvedAt?: string;
   status: ApprovalStatus;
-  approver: "auto" | "human";
+  approver?: "auto" | "human";
   notes: string;
 }
 
@@ -183,6 +226,7 @@ export interface Event {
   name: string;
   agentId?: AgentRole;
   artifactId?: string;
+  taskId?: string;
   message: string;
   data?: Record<string, unknown>;
 }
@@ -228,6 +272,32 @@ export interface ArtifactStore {
 
 export interface EventStore {
   append(event: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event>;
+}
+
+export interface ToolContext {
+  runId: string;
+  workspace: Workspace;
+  workspaceDriver: WorkspaceDriver;
+  eventStore?: EventStore;
+  modelMode: ModelMode;
+  allowCommands?: boolean;
+  hasApproval?: (action: string) => boolean;
+  requestApproval?: (approval: Omit<Approval, "id" | "runId" | "requestedAt" | "createdAt" | "status" | "notes"> & { notes?: string }) => Promise<Approval>;
+}
+
+export interface ToolDefinition<Input, Output> {
+  name: string;
+  description: string;
+  riskLevel: ToolRiskLevel;
+  requiresApproval: boolean;
+  execute(input: Input, context: ToolContext): Promise<Output>;
+}
+
+export interface ReviewResult {
+  verdict: ReviewVerdict;
+  blockingIssues: string[];
+  requiredFixes: string[];
+  summary: string;
 }
 
 export interface CreateArtifactInput {
