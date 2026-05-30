@@ -128,7 +128,7 @@ describe("local repositories", () => {
 });
 
 describe("tool runtime", () => {
-  it("pauses dangerous tools until approval is present", async () => {
+  it("rejects command execution before approval when commands are enabled", async () => {
     const context: ToolContext = {
       runId: "run",
       workspace: {
@@ -152,10 +152,44 @@ describe("tool runtime", () => {
         },
         async copyDirectory() {}
       },
-      modelMode: "mock"
+      modelMode: "mock",
+      allowCommands: true
     };
 
     await expect(runCommandTool.execute({ command: "node", args: ["--version"] }, context)).rejects.toBeInstanceOf(ToolApprovalRequiredError);
+  });
+
+  it("rejects disabled command execution before requesting approval", async () => {
+    const context: ToolContext = {
+      runId: "run",
+      workspace: {
+        runId: "run",
+        rootDir: "root",
+        workspaceDir: "root/workspace",
+        finalPackageDir: "root/final-package"
+      } satisfies Workspace,
+      workspaceDriver: {
+        async create() {
+          throw new Error("unused");
+        },
+        async writeFile() {
+          return "unused";
+        },
+        async readFile() {
+          return "unused";
+        },
+        async listFiles() {
+          return [];
+        },
+        async copyDirectory() {}
+      },
+      modelMode: "mock",
+      requestApproval: async () => {
+        throw new Error("approval should not be requested");
+      }
+    };
+
+    await expect(runCommandTool.execute({ command: "node", args: ["--version"] }, context)).rejects.toThrow("run_command is disabled");
   });
 });
 

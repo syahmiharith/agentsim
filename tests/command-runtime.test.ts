@@ -54,6 +54,19 @@ describe("safe command execution", () => {
     const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");
     expect(stateTrace).toContain("\"timedOut\":true");
   });
+
+  it("records nonzero process failures without reporting success", async () => {
+    const { driver, workspace } = await createWorkspace("command-nonzero");
+
+    await expect(driver.runCommand(workspace, {
+      command: "node",
+      args: ["-e", "process.exit(7)"]
+    })).rejects.toThrow("Command failed with exit code 7");
+
+    const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");
+    expect(stateTrace).toContain("\"exitCode\":7");
+    expect(stateTrace).not.toContain("\"exitCode\":0");
+  });
 });
 
 async function createWorkspace(runId: string) {

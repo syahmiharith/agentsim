@@ -70,14 +70,14 @@ export const runCommandTool: ToolDefinition<{ command: string; args?: string[] }
   requiresApproval: true,
   async execute(input, context) {
     const action = [input.command, ...(input.args ?? [])].join(" ");
-    await requireApproval(runCommandTool, action, context);
-    await emitToolCalled(context, "run_command", action);
     if (context.modelMode === "mock" && !context.allowCommands) {
       throw new Error("run_command is disabled in mock mode unless allowCommands is true.");
     }
     if (!context.allowCommands) {
       throw new Error("run_command is disabled unless allowCommands is true.");
     }
+    await requireApproval(runCommandTool, action, context);
+    await emitToolCalled(context, "run_command", action);
 
     if (!context.workspaceDriver.runCommand) {
       throw new Error("run_command is not supported by this workspace driver.");

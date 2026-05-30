@@ -66,6 +66,8 @@ describe("demo workflow", () => {
     expect(events).toContain("agent.message.sent");
     expect(events).toContain("agent.action.started");
     expect(events).toContain("agent.action.completed");
+    expect(events).toContain("tool.called");
+    expect(events).toContain("write_file");
 
     const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
     expect(agentActions.actions).toHaveLength(result.artifacts.length);
@@ -102,7 +104,9 @@ describe("demo workflow", () => {
     const stateArtifacts = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "artifacts.json"), "utf8"));
     const stateContextPackages = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "context-packages.json"), "utf8"));
     const stateEvents = await readFile(join(outputRoot, "test-run", "state", "events.jsonl"), "utf8");
+    const stateDomainSpec = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-spec.json"), "utf8"));
     expect(stateRun.status).toBe("completed");
+    expect(stateDomainSpec.appName).toBe("Inventory Request Desk");
     expect(stateTasks.every((task: { status: string; attempts: number }) => task.status === "completed" && task.attempts === 1)).toBe(true);
     expect(stateArtifacts).toHaveLength(result.artifacts.length);
     expect(stateContextPackages).toHaveLength(agentActions.actions.length);

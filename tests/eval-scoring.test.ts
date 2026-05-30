@@ -13,6 +13,10 @@ describe("eval scoring", () => {
       await mkdir(join(path, ".."), { recursive: true });
       await writeFile(path, "ok", "utf8");
     }
+    await mkdir(join(finalPackageDir, "trace"), { recursive: true });
+    await writeFile(join(finalPackageDir, "trace", "run-summary.json"), `${JSON.stringify({
+      validationResult: { ok: true, failures: [] }
+    })}\n`, "utf8");
 
     const result = await scoreEvalRun("prompt", "run", {
       taskRun: {
@@ -27,9 +31,12 @@ describe("eval scoring", () => {
       artifacts: [],
       decisions: [],
       domainSpec: {} as RunDemoResult["domainSpec"]
-    });
+    }, { durationMs: 123 });
 
     expect(result.requiredAppFilesPresent).toBe(true);
+    expect(result.durationMs).toBe(123);
+    expect(result.validationResult?.ok).toBe(true);
+    expect(result.failureCategory).toBe("none");
     expect(summarizeEvalResults([result])).toEqual({ total: 1, passed: 1, failed: 0 });
   });
 });

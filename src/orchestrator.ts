@@ -198,7 +198,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
 
 export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "goal" | "runId"> & { runId: string }): Promise<RunDemoResult> {
   const outputRoot = options.outputRoot ?? "outputs";
-  const runRoot = resolve(outputRoot, options.runId);
+  const runRoot = resolveRunRoot(outputRoot, options.runId);
   await assertRunExists(runRoot, options.runId);
 
   const runsRepo = new LocalRunsRepo(runRoot);
@@ -227,7 +227,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const artifacts = await artifactsRepo.listArtifactsByRun();
   const artifactStore = new FileArtifactStore(workspace, artifacts);
   const domainPack = options.domainPack ?? softwareFreelancePack;
-  const domainSpec = domainPack.inferDomainSpec(existingRun.userGoal);
+  const domainSpec = await loadPersistedDomainSpec(runRoot, domainPack, existingRun.userGoal);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const existingTasks = await tasksRepo.listTasksByRun();
   if (existingTasks.length === 0) {
@@ -710,7 +710,7 @@ export async function retryOrFailTask(runtime: OrchestratorRuntime, taskId: stri
 }
 
 export function resolveRunRoot(outputRoot: string, runId: string): string {
-  return join(outputRoot, runId);
+  return safeJoin(resolve(outputRoot), runId);
 }
 
 async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Promise<void> {
@@ -725,6 +725,7 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
   };
 
   await runtime.runsRepo.createRun(runState);
+  await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
   await runtime.tasksRepo.saveTasks(compileAgentStepsToTasks(runtime.runId, runtime.steps));
   await runtime.eventStore.append({
     level: "info",
@@ -870,10 +871,11 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   for (const approval of approvals) {
     await runtime.approvalsRepo.createApproval(approval);
   }
+  const traceApprovals = mergeApprovalsById(await runtime.approvalsRepo.listApprovalsByRun());
 
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/decisions.json"), JSON.stringify({ decisions: runtime.decisions }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals }, null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals: traceApprovals }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-messages.json"), JSON.stringify({ messages: runtime.agentMessages }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-actions.json"), JSON.stringify({ actions: runtime.agentActions }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-packages.json"), JSON.stringify({ contextPackages: runtime.contextPackages }, null, 2), "utf8");
@@ -969,6 +971,18 @@ async function assertRunExists(runRoot: string, runId: string): Promise<void> {
   } catch {
     throw new Error(`Run ${runId} does not exist or is missing persisted state.`);
   }
+}
+
+async function loadPersistedDomainSpec(runRoot: string, domainPack: DomainPack, goal: string): Promise<DomainSpec> {
+  try {
+    return JSON.parse(await readFile(safeJoin(runRoot, "state/domain-spec.json"), "utf8")) as DomainSpec;
+  } catch {
+    return domainPack.inferDomainSpec(goal);
+  }
+}
+
+function mergeApprovalsById(approvals: Approval[]): Approval[] {
+  return [...new Map(approvals.map((approval) => [approval.id, approval])).values()];
 }
 
 function isString(value: unknown): value is string {

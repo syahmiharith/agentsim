@@ -110,7 +110,7 @@ pnpm agentsim contexts <runId>
 pnpm agentsim context <runId> <contextPackageId>
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
-pnpm agentsim resume <runId>
+pnpm agentsim resume <runId> [--mock|--live]
 pnpm eval:mock
 ```
 
@@ -126,7 +126,7 @@ Main responsibilities:
 - compile `AgentStep` entries into persisted tasks
 - rehydrate existing run state for `resume`
 - mark dependency-ready tasks before execution
-- infer a `DomainSpec` through the domain pack
+- infer a `DomainSpec` through the domain pack and persist it for resume
 - record provider and domain decisions
 - execute tasks through the scheduler in deterministic compiled-step order
 - assemble and validate a context package before each agent action
@@ -139,7 +139,7 @@ Main responsibilities:
 
 The current orchestration version remains sequential so the final package stays compatible. The scheduler and repositories are intentionally separate so later work can add richer execution without changing the artifact contract.
 
-`resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses.
+`resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, reloads the persisted domain spec, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses. If no model flag is supplied, the CLI uses the persisted run model mode.
 
 Keep workflow changes narrowly scoped. If behavior becomes reusable across future workflows, extract a small helper or interface only when it removes real duplication.
 
@@ -184,7 +184,7 @@ Trace expectations:
 - `trace/context-packages.json` records the validated context package used by each completed action
 - `trace/context-eval.json` records context coverage, size, and provenance checks
 - `trace/decisions.json` records system and human decisions
-- `trace/approvals.json` records approval state
+- `trace/approvals.json` records artifact, tool, and human approval state
 - `trace/domain-spec.json` records inferred domain behavior
 - `trace/artifact-lineage.json` records artifact metadata and dependencies
 - `trace/run-summary.json` records run result and validation status
@@ -256,7 +256,7 @@ Approval commands operate on local state only. They do not send emails, deploy c
 
 Final package validation is converted into a review result. A passing verdict completes the run. A failing verdict fails the run. A recoverable revise verdict emits a clear event when repair is disabled, which is the default. The experimental repair path can create a bounded fix task, but automated fix execution is intentionally not claimed yet.
 
-`pnpm eval:mock` runs deterministic mock evals across several software-freelance prompts and writes `outputs/evals/latest.json` and `outputs/evals/latest.md`.
+`pnpm eval:mock` runs deterministic mock evals across several software-freelance prompts and writes `outputs/evals/latest.json` and `outputs/evals/latest.md`, including duration, validation status, and a coarse failure category.
 
 ## Provider Layer
 

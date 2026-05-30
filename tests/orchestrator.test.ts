@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -207,6 +207,23 @@ describe("scheduler-driven orchestrator", () => {
     await approvalsRepo.updateApprovalStatus(approval.id, "approved");
     await tasksRepo.updateTaskStatus(approval.taskId ?? "", "ready");
     await runsRepo.updateRunStatus("running");
+    const persistedDomainSpec = {
+      appName: "Persisted Resume Desk",
+      appSlug: "persisted-resume-desk",
+      domain: "resume verification",
+      targetUsers: ["operator"],
+      primaryEntity: {
+        name: "Resume Item",
+        pluralName: "Resume Items",
+        slug: "resume-items",
+        fields: [{ name: "title", label: "Title", type: "text", required: true }]
+      },
+      workflowStatuses: ["Requested", "Done"],
+      screens: [{ name: "Queue", purpose: "Track resume items", actions: ["Create"] }],
+      coreActions: ["Create"],
+      seedRecords: []
+    };
+    await writeFile(join(runRoot, "state", "domain-spec.json"), `${JSON.stringify(persistedDomainSpec, null, 2)}\n`, "utf8");
     shouldPause = false;
 
     const resumed = await resumeOrchestrator({
@@ -220,10 +237,13 @@ describe("scheduler-driven orchestrator", () => {
     const run = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "run.json"), "utf8"));
     const tasks = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "tasks.json"), "utf8"));
     const contextPackages = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "context-packages.json"), "utf8"));
+    const traceApprovals = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "approvals.json"), "utf8"));
     expect(resumed.taskRun.status).toBe("COMPLETED");
+    expect(resumed.domainSpec.appName).toBe("Persisted Resume Desk");
     expect(run.status).toBe("completed");
     expect(tasks.every((task: { status: string }) => task.status === "completed")).toBe(true);
     expect(contextPackages.length).toBeGreaterThanOrEqual(2);
+    expect(traceApprovals.approvals.some((item: { id: string; status: string }) => item.id === approval.id && item.status === "approved")).toBe(true);
   });
 
   it("refuses resume with pending approvals or terminal runs", async () => {
@@ -266,6 +286,14 @@ describe("scheduler-driven orchestrator", () => {
       agentSteps: [testStep("client-proposal", "proposal", [], "client/proposal.md")],
       validateFinalPackage: async () => okValidation()
     })).rejects.toThrow("cannot be resumed from terminal status completed");
+
+    await expect(resumeOrchestrator({
+      outputRoot: completedRoot,
+      runId: "../escape",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("client-proposal", "proposal", [], "client/proposal.md")],
+      validateFinalPackage: async () => okValidation()
+    })).rejects.toThrow("Path escapes workspace");
   });
 
   it("emits repair-loop events for recoverable validation failures", async () => {

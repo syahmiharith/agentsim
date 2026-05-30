@@ -42,17 +42,46 @@ describe("tool runtime", () => {
     expect((await context.artifactsRepo.listArtifactsByRun()).map((artifact) => artifact.id)).toContain(result.id);
   });
 
-  it("pauses dangerous tools through the approval path", async () => {
+  it("rejects disabled commands before creating approvals", async () => {
     const context = await createRuntimeContext("tool-approval");
+    const tools = createToolRuntime(context);
+
+    await expect(tools.runCommand({ command: "node", args: ["--version"] })).rejects.toThrow("run_command is disabled");
+    expect(await context.approvalsRepo.listApprovalsByRun()).toEqual([]);
+  });
+
+  it("pauses enabled dangerous commands until approval is present", async () => {
+    const context = await createRuntimeContext("tool-command-approval", true);
     const tools = createToolRuntime(context);
 
     await expect(tools.runCommand({ command: "node", args: ["--version"] })).rejects.toBeInstanceOf(ToolApprovalRequiredError);
     const approvals = await context.approvalsRepo.listApprovalsByRun();
     expect(approvals[0]).toMatchObject({ status: "pending", action: "node --version" });
   });
+
+  it("runs approved allowlisted commands and writes command traces", async () => {
+    const context = await createRuntimeContext("tool-command-approved", true);
+    const tools = createToolRuntime(context);
+    await context.approvalsRepo.createApproval({
+      runId: context.runId,
+      requestedBy: "tool-runtime",
+      action: "node --version",
+      riskLevel: "high",
+      status: "approved",
+      notes: "approved in test"
+    });
+
+    const result = await tools.runCommand({ command: "node", args: ["--version"] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("v");
+    const commandTrace = await readFile(join(context.workspace.rootDir, "state", "command-results.jsonl"), "utf8");
+    expect(commandTrace).toContain("node");
+    expect(commandTrace).toContain("\"exitCode\":0");
+  });
 });
 
-async function createRuntimeContext(runId: string) {
+async function createRuntimeContext(runId: string, allowCommands = false) {
   const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-tool-runtime-"));
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(runId, outputRoot);
@@ -71,7 +100,8 @@ async function createRuntimeContext(runId: string) {
     artifactsRepo,
     approvalsRepo,
     modelMode: "mock" as const,
-    allowCommands: false,
+    allowCommands,
+    hasApproval: async (action: string) => (await approvalsRepo.listApprovalsByRun()).some((approval) => approval.action === action && approval.status === "approved"),
     requestApproval: (approval: Parameters<NonNullable<ToolContext["requestApproval"]>>[0]) =>
       approvalsRepo.createApproval({ ...approval, runId, notes: approval.notes ?? "approval requested" })
   };

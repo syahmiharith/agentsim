@@ -8,7 +8,7 @@ import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "./core/reposi
 import { loadRunInspection, renderApprovals, renderArtifacts, renderContext, renderContexts, renderEvents, renderInspect, renderTasks } from "./inspection.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
 import { startDashboard } from "./tui/run-inspector.js";
-import { resumeOrchestrator } from "./orchestrator.js";
+import { resolveRunRoot, resumeOrchestrator } from "./orchestrator.js";
 import { runDemo } from "./workflow.js";
 
 type CliCommand = "run" | "demo" | "dashboard" | "tui" | "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "contexts" | "context" | "approve" | "reject" | "resume";
@@ -101,10 +101,12 @@ export async function main(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const provider = createModelProvider(options.providerSelection);
+    const runId = options.runId ?? options.goal ?? "";
+    const providerSelection = await selectResumeProviderSelection(resolve(options.outputRoot), runId, options.providerSelection);
+    const provider = createModelProvider(providerSelection);
     const result = await resumeOrchestrator({
       outputRoot: resolve(options.outputRoot),
-      runId: options.runId ?? options.goal ?? "",
+      runId,
       modelProvider: provider
     });
     console.log(`Agentsim run resumed.`);
@@ -301,20 +303,33 @@ function addResumeCommand(program: Command, onParse: (options: CliOptions) => vo
   program
     .command("resume")
     .argument("<runId>", "run id")
+    .option("--mock", "resume with deterministic mock model mode")
+    .option("--live", "resume with configured live model mode")
     .option("--out-dir <dir>", "output root directory", "outputs")
-    .action((runId: string, flags: { outDir: string }) => {
+    .action((runId: string, flags: { mock?: boolean; live?: boolean; outDir: string }) => {
+      if (flags.mock && flags.live) {
+        throw new Error("Choose only one provider mode: --mock or --live.");
+      }
       onParse({
         command: "resume",
         goal: runId,
         runId,
-        providerSelection: "auto",
+        providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
         outputRoot: flags.outDir
       });
     });
 }
 
+async function selectResumeProviderSelection(outputRoot: string, runId: string, selection: ProviderSelection): Promise<ProviderSelection> {
+  if (selection !== "auto") {
+    return selection;
+  }
+  const run = await new LocalRunsRepo(resolveRunRoot(outputRoot, runId)).getRun();
+  return run.modelMode;
+}
+
 async function resolveApproval(input: { outputRoot: string; runId: string; approvalId: string; status: "approved" | "rejected" }): Promise<void> {
-  const runRoot = resolve(input.outputRoot, input.runId);
+  const runRoot = resolveRunRoot(input.outputRoot, input.runId);
   const approvalsRepo = new LocalApprovalsRepo(runRoot);
   const tasksRepo = new LocalTasksRepo(runRoot);
   const runsRepo = new LocalRunsRepo(runRoot);
@@ -343,7 +358,7 @@ function printUsage(): void {
   agentsim context <runId> <contextPackageId> [--out-dir outputs]
   agentsim approve <runId> <approvalId> [--out-dir outputs]
   agentsim reject <runId> <approvalId> [--out-dir outputs]
-  agentsim resume <runId> [--out-dir outputs]
+  agentsim resume <runId> [--mock|--live] [--out-dir outputs]
   pnpm agentsim run "Build an inventory request system for a flower company" [--mock|--live] [--out-dir outputs] [--run-id id]
   pnpm agentsim dashboard [runId] [--out-dir outputs]
   pnpm agentsim tui [runId] [--out-dir outputs]

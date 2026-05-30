@@ -198,6 +198,7 @@ outputs/{runId}/state/
 +-- events.jsonl
 +-- artifacts.json
 +-- approvals.json
++-- domain-spec.json
 ```
 
 Use the inspection commands to read that state:
@@ -215,10 +216,10 @@ Approval records can be resolved locally:
 ```bash
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
-pnpm agentsim resume <runId>
+pnpm agentsim resume <runId> [--mock|--live]
 ```
 
-If a run pauses for approval, resolve it with `approve` or `reject`. `resume` rehydrates the existing run state from `outputs/{runId}/state/` and continues the scheduler from the same run ID. It refuses terminal runs and runs with pending approvals.
+If a run pauses for approval, resolve it with `approve` or `reject`. `resume` rehydrates the existing run state from `outputs/{runId}/state/` and continues the scheduler from the same run ID. It refuses terminal runs and runs with pending approvals. When no provider flag is supplied, resume uses the persisted run model mode.
 
 The current mock workflow only uses safe default operations, so completed mock runs usually have auto-approved artifact records rather than pending dangerous tool approvals. Dangerous tools such as `run_command` stay disabled unless the orchestrator is explicitly configured to allow commands.
 
@@ -230,6 +231,8 @@ pnpm test
 pnpm build
 pnpm eval:mock
 ```
+
+`pnpm eval:mock` writes JSON and Markdown reports under `outputs/evals/`, including run duration, validation status, and a coarse failure category for each prompt.
 
 Useful entry points:
 

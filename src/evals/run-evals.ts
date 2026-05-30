@@ -23,6 +23,7 @@ async function main(): Promise<void> {
 
   for (const [index, prompt] of prompts.entries()) {
     const runId = `eval-${stamp}-${index + 1}`;
+    const startedAt = Date.now();
     try {
       const result = await runOrchestrator({
         goal: prompt,
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
         runId,
         modelProvider: new MockModelProvider()
       });
-      results.push(await scoreEvalRun(prompt, runId, result));
+      results.push(await scoreEvalRun(prompt, runId, result, { durationMs: Date.now() - startedAt }));
     } catch (error) {
       results.push({
         prompt,
@@ -39,6 +40,8 @@ async function main(): Promise<void> {
         artifactCount: 0,
         finalPackagePath: join(outputRoot, runId, "final-package"),
         requiredAppFilesPresent: false,
+        durationMs: Date.now() - startedAt,
+        failureCategory: "runtime" as const,
         failures: [error instanceof Error ? error.message : "Unknown eval failure."]
       });
     }
@@ -57,17 +60,17 @@ async function main(): Promise<void> {
   }
 }
 
-function renderMarkdownReport(report: { generatedAt: string; summary: { total: number; passed: number; failed: number }; results: Array<{ prompt: string; runId: string; status: string; artifactCount: number; failures: string[] }> }): string {
+function renderMarkdownReport(report: { generatedAt: string; summary: { total: number; passed: number; failed: number }; results: Array<{ prompt: string; runId: string; status: string; artifactCount: number; durationMs: number; failureCategory: string; failures: string[] }> }): string {
   return [
     "# AgentSim Mock Eval Report",
     "",
     `Generated: ${report.generatedAt}`,
     `Passed: ${report.summary.passed}/${report.summary.total}`,
     "",
-    "| Prompt | Run ID | Status | Artifacts | Failures |",
-    "| --- | --- | --- | ---: | --- |",
+    "| Prompt | Run ID | Status | Artifacts | Duration | Category | Failures |",
+    "| --- | --- | --- | ---: | ---: | --- | --- |",
     ...report.results.map((result) =>
-      `| ${escapeCell(result.prompt)} | ${result.runId} | ${result.status} | ${result.artifactCount} | ${escapeCell(result.failures.join("; ") || "none")} |`
+      `| ${escapeCell(result.prompt)} | ${result.runId} | ${result.status} | ${result.artifactCount} | ${result.durationMs}ms | ${result.failureCategory} | ${escapeCell(result.failures.join("; ") || "none")} |`
     ),
     ""
   ].join("\n");

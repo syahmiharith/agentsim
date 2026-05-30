@@ -78,11 +78,7 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
         env: sanitizedCommandEnv()
       }, (error, stdout, stderr) => {
         const timedOut = Boolean(error && "killed" in error && error.killed);
-        const exitCode = typeof error === "object" && error && "code" in error && typeof error.code === "number"
-          ? error.code
-          : timedOut
-            ? 124
-            : 0;
+        const exitCode = deriveCommandExitCode(error, timedOut);
         resolveResult({
           command: input.command,
           args: input.args ?? [],
@@ -136,6 +132,19 @@ function resolveCommandCwd(workspace: Workspace, cwd = "."): string {
     throw new Error(`Command cwd must stay inside workspace or final package: ${cwd}`);
   }
   return resolved;
+}
+
+function deriveCommandExitCode(error: unknown, timedOut: boolean): number {
+  if (!error) {
+    return 0;
+  }
+  if (timedOut) {
+    return 124;
+  }
+  if (typeof error === "object" && error && "code" in error && typeof error.code === "number") {
+    return error.code;
+  }
+  return 1;
 }
 
 function sanitizedCommandEnv(): NodeJS.ProcessEnv {

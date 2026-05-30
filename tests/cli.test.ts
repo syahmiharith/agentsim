@@ -55,6 +55,13 @@ describe("CLI parsing", () => {
     const resume = parseArgs(["resume", "test-run"]);
     expect(resume.command).toBe("resume");
     expect(resume.runId).toBe("test-run");
+    expect(resume.providerSelection).toBe("auto");
+
+    const mockResume = parseArgs(["resume", "test-run", "--mock"]);
+    expect(mockResume.providerSelection).toBe("mock");
+
+    const liveResume = parseArgs(["resume", "test-run", "--live"]);
+    expect(liveResume.providerSelection).toBe("live");
   });
 
   it("returns no goal when goal is missing", () => {
@@ -64,6 +71,7 @@ describe("CLI parsing", () => {
 
   it("rejects mutually exclusive model mode flags", () => {
     expect(() => parseArgs(["run", "Build", "inventory", "--mock", "--live"])).toThrow("--mock or --live");
+    expect(() => parseArgs(["resume", "test-run", "--mock", "--live"])).toThrow("--mock or --live");
   });
 
   it("rejects unknown flags", () => {

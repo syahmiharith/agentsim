@@ -20,7 +20,7 @@ import {
   timeline,
   userGuide
 } from "../templates/markdown.js";
-import { writeGeneratedApp } from "../templates/app.js";
+import { renderGeneratedAppFiles } from "../templates/app.js";
 import type { AgentContext, AgentOutputSource, AgentRole, AgentStep, AgentStepResult, ArtifactType } from "../types.js";
 
 type MarkdownFactory = (context: AgentContext) => string;
@@ -45,7 +45,12 @@ export const agentSteps: AgentStep[] = [
     requiredInputs: ["task-breakdown", "architecture", "api-plan"],
     reviewRequired: true,
     async execute(context): Promise<AgentStepResult> {
-      await writeGeneratedApp(context.workspace, context.workspaceDriver, context.domainSpec);
+      if (!context.tools) {
+        throw new Error("builder-app requires the orchestrator tool runtime.");
+      }
+      for (const [path, content] of Object.entries(renderGeneratedAppFiles(context.workspace, context.domainSpec))) {
+        await context.tools.writeFile({ path, content });
+      }
       await context.workspaceDriver.copyDirectory(
         join(context.workspace.workspaceDir, "app"),
         join(context.workspace.finalPackageDir, "app")
