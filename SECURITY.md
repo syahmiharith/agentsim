@@ -104,7 +104,9 @@ Tools must execute through permission-aware wrappers.
 - `read_file`, `write_file`, and `list_files` are contained to the workspace.
 - `create_artifact` must use the artifact store and path containment.
 - `run_command` is dangerous and approval-required.
-- In mock mode, command execution is disabled unless a caller explicitly allows it.
+- Command execution is disabled unless a caller explicitly allows it.
+- Command execution uses an allowlist, timeout, output cap, contained cwd, and sanitized environment.
+- Command results are traced with stdout/stderr previews rather than unbounded output.
 - `ask_human` creates an approval path instead of silently approving risky work.
 
 ## Dependency and Generated Code Review

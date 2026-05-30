@@ -32,15 +32,17 @@ Current capability:
 * generate planning, technical, review, client handoff, trace, and app prototype files
 * run in deterministic mock mode without provider keys
 * persist run, task, artifact, event, message, and approval state under each run
-* inspect completed runs from the CLI
+* inspect and resume local runs from the CLI after approvals are resolved
+* run a deterministic mock eval suite across several freelance software prompts
 * use a model-agnostic Chat Completions-compatible provider in live mode when configured
 
 Current limitations:
 
 * generated apps are simple prototypes and still need human review before client delivery
 * the workflow is tuned for the first software-freelance demo, not arbitrary domains
-* approvals, workspace execution, command execution, and provider routing are still early
+* approvals, workspace execution, command execution, repair loops, and provider routing are still early
 * the task graph is local-first and sequential; it is not a distributed scheduler
+* command execution is disabled by default and requires both approval and explicit opt-in
 * no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
@@ -216,7 +218,9 @@ pnpm agentsim reject <runId> <approvalId>
 pnpm agentsim resume <runId>
 ```
 
-The current mock workflow only uses safe default operations, so completed mock runs usually have auto-approved artifact records rather than pending dangerous tool approvals.
+If a run pauses for approval, resolve it with `approve` or `reject`. `resume` rehydrates the existing run state from `outputs/{runId}/state/` and continues the scheduler from the same run ID. It refuses terminal runs and runs with pending approvals.
+
+The current mock workflow only uses safe default operations, so completed mock runs usually have auto-approved artifact records rather than pending dangerous tool approvals. Dangerous tools such as `run_command` stay disabled unless the orchestrator is explicitly configured to allow commands.
 
 ## Development
 
@@ -224,13 +228,14 @@ The current mock workflow only uses safe default operations, so completed mock r
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm eval:mock
 ```
 
 Useful entry points:
 
 * `src/cli.ts` - CLI command surface
-* `src/workflow.ts` - current end-to-end workflow and compatibility wrapper
-* `src/orchestrator.ts` - orchestration entry points for task-based execution
+* `src/workflow.ts` - compatibility wrapper for the orchestrator
+* `src/orchestrator.ts` - run, resume, scheduler, validation, and approval orchestration
 * `src/types.ts` - core contracts
 * `src/agents/` - role definitions and artifact-producing step registry
 * `src/core/` - artifacts, events, hashing, redaction, path safety, repositories, scheduler, tools, and workspace behavior
@@ -263,7 +268,9 @@ Planned contracts include:
 * `ArtifactStore`
 * `EventStore`
 
-The current orchestrator foundation compiles the existing `AgentStep` registry into persisted tasks, marks dependency-ready tasks, records task lifecycle events, and keeps the existing final package contract intact. Tools execute through permission-aware wrappers, with dangerous actions requiring an approval path before execution.
+The current orchestrator compiles the existing `AgentStep` registry into persisted tasks, marks dependency-ready tasks, records task lifecycle events, supports approval pause/resume, and keeps the existing final package contract intact. Tools execute through permission-aware wrappers, with dangerous actions requiring approval and explicit command opt-in before execution.
+
+Validation results are converted into review verdicts. Passing validation completes the run. Unrecoverable validation failures fail the run. Recoverable failures emit a repair-loop-disabled event by default; the experimental repair path can create a bounded fix task but does not yet execute automated repairs.
 
 The current implementation is deliberately thin. The priority is to make the software-delivery workflow useful before expanding the platform surface area.
 

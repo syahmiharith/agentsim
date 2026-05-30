@@ -15,6 +15,17 @@ export type TaskKind = "artifact_generation" | "app_generation" | "review" | "fi
 export type ToolRiskLevel = "safe" | "medium" | "dangerous";
 export type ApprovalRiskLevel = "low" | "medium" | "high";
 export type ReviewVerdict = "pass" | "revise" | "fail";
+export type ContextItemKind =
+  | "user_goal"
+  | "domain_spec"
+  | "task"
+  | "artifact"
+  | "message"
+  | "decision"
+  | "approval"
+  | "test_result"
+  | "policy";
+export type ContextSensitivity = "public" | "internal" | "secret-redacted";
 
 export type TaskRunStatus =
   | "PENDING"
@@ -82,6 +93,8 @@ export interface AgentActionRecord {
   outputType: ArtifactType;
   inputMessageIds: string[];
   inputArtifactIds: string[];
+  contextPackageId?: string;
+  contextHash?: string;
   outputArtifactId?: string;
   status: AgentActionStatus;
   modelMode: ModelMode;
@@ -175,6 +188,8 @@ export interface Workspace {
 export interface ArtifactLineage {
   inputArtifactIds: string[];
   promptHash?: string;
+  contextPackageId?: string;
+  contextHash?: string;
 }
 
 export interface Artifact {
@@ -218,6 +233,60 @@ export interface Approval {
   notes: string;
 }
 
+export interface ContextItem {
+  id: string;
+  runId: string;
+  kind: ContextItemKind;
+  source: string;
+  sourceId?: string;
+  content: string;
+  contentHash: string;
+  createdAt: string;
+  sensitivity: ContextSensitivity;
+}
+
+export interface ContextPolicy {
+  requiredKinds: ContextItemKind[];
+  allowedArtifactTypes: ArtifactType[];
+  maxCharsPerItem: number;
+  maxTotalChars: number;
+  includeDomainSpec: boolean;
+  includeMessages: boolean;
+  includeDecisions: boolean;
+  includeApprovals: boolean;
+  allowedTools: string[];
+}
+
+export interface ContextPackage {
+  id: string;
+  runId: string;
+  taskId: string;
+  agentId: AgentRole;
+  stepId: string;
+  goal: string;
+  objective: string;
+  inputArtifactIds: string[];
+  messageIds: string[];
+  itemIds: string[];
+  items: ContextItem[];
+  policy: ContextPolicy;
+  contextHash: string;
+  createdAt: string;
+}
+
+export interface ContextEvaluation {
+  runId: string;
+  generatedAt: string;
+  packageCount: number;
+  actionCount: number;
+  artifactCount: number;
+  totalItemCount: number;
+  totalChars: number;
+  requiredCoverageOk: boolean;
+  provenanceOk: boolean;
+  failures: string[];
+}
+
 export interface Event {
   id: string;
   runId: string;
@@ -250,9 +319,21 @@ export interface ModelProvider {
 
 export interface RunCommandResult {
   command: string;
+  args?: string[];
+  cwd?: string;
   exitCode: number;
   stdout: string;
   stderr: string;
+  durationMs?: number;
+  timedOut?: boolean;
+}
+
+export interface RunCommandInput {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
 }
 
 export interface WorkspaceDriver {
@@ -261,7 +342,7 @@ export interface WorkspaceDriver {
   readFile(workspace: Workspace, relativePath: string): Promise<string>;
   listFiles(workspace: Workspace, relativePath?: string): Promise<string[]>;
   copyDirectory(sourceDir: string, targetDir: string): Promise<void>;
-  runCommand?(workspace: Workspace, command: string): Promise<RunCommandResult>;
+  runCommand?(workspace: Workspace, input: RunCommandInput): Promise<RunCommandResult>;
 }
 
 export interface ArtifactStore {
@@ -272,6 +353,7 @@ export interface ArtifactStore {
 
 export interface EventStore {
   append(event: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event>;
+  appendExisting?(event: Event): Promise<Event>;
 }
 
 export interface ToolContext {
@@ -279,9 +361,12 @@ export interface ToolContext {
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   eventStore?: EventStore;
+  artifactStore?: ArtifactStore;
+  artifactsRepo?: { createArtifactRecord(artifact: Artifact): Promise<Artifact> };
+  approvalsRepo?: { createApproval(input: Omit<Approval, "id" | "requestedAt" | "createdAt" | "status"> & { id?: string; status?: ApprovalStatus }): Promise<Approval>; listApprovalsByRun(): Promise<Approval[]> };
   modelMode: ModelMode;
   allowCommands?: boolean;
-  hasApproval?: (action: string) => boolean;
+  hasApproval?: (action: string) => boolean | Promise<boolean>;
   requestApproval?: (approval: Omit<Approval, "id" | "runId" | "requestedAt" | "createdAt" | "status" | "notes"> & { notes?: string }) => Promise<Approval>;
 }
 
@@ -300,6 +385,15 @@ export interface ReviewResult {
   summary: string;
 }
 
+export interface ToolRuntime {
+  readFile(input: { path: string }): Promise<string>;
+  writeFile(input: { path: string; content: string }): Promise<string>;
+  listFiles(input: { path?: string }): Promise<string[]>;
+  createArtifact(input: CreateArtifactInput): Promise<{ id: string; type: ArtifactType }>;
+  runCommand(input: RunCommandInput): Promise<RunCommandResult>;
+  askHuman(input: { action: string; taskId?: string; requestedBy: string; notes?: string }): Promise<{ approvalId: string }>;
+}
+
 export interface CreateArtifactInput {
   type: ArtifactType;
   ownerAgentId: AgentRole;
@@ -307,6 +401,8 @@ export interface CreateArtifactInput {
   workspaceRelativePath: string;
   finalPackagePath: string;
   inputArtifactIds?: string[];
+  contextPackageId?: string;
+  contextHash?: string;
   reviewStatus?: ReviewStatus;
   approvalStatus?: ApprovalStatus;
   status?: ArtifactStatus;
@@ -348,6 +444,8 @@ export interface AgentContext {
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
+  contextPackage?: ContextPackage;
+  tools?: ToolRuntime;
   currentMessages?: AgentMessageRecord[];
   appValidation?: { ok: boolean; message: string };
 }
@@ -371,6 +469,7 @@ export interface AgentStep {
   outputType: ArtifactType;
   requiredInputs: ArtifactType[];
   reviewRequired: boolean;
+  contextPolicy?: ContextPolicy;
   execute(context: AgentContext): Promise<AgentStepResult>;
 }
 

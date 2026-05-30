@@ -1,7 +1,9 @@
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
-import type { Workspace, WorkspaceDriver } from "../types.js";
+import { execFile } from "node:child_process";
+import { cp, mkdir, readdir, readFile, rm, writeFile, appendFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import type { RunCommandInput, RunCommandResult, Workspace, WorkspaceDriver } from "../types.js";
 import { assertPathInside, safeJoin } from "./paths.js";
+import { redactSecrets } from "./redact.js";
 
 export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
   private readonly createdRoots = new Set<string>();
@@ -57,6 +59,50 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
     await cp(source, target, { recursive: true });
   }
 
+  async runCommand(workspace: Workspace, input: RunCommandInput): Promise<RunCommandResult> {
+    const allowedCommands = new Set(["node", "npm", "pnpm"]);
+    if (!allowedCommands.has(input.command)) {
+      throw new Error(`Command is not allowlisted: ${input.command}`);
+    }
+
+    const cwd = resolveCommandCwd(workspace, input.cwd);
+    const timeoutMs = input.timeoutMs ?? 30_000;
+    const maxOutputBytes = input.maxOutputBytes ?? 64_000;
+    const startedAt = Date.now();
+
+    const result = await new Promise<RunCommandResult>((resolveResult) => {
+      execFile(input.command, input.args ?? [], {
+        cwd,
+        timeout: timeoutMs,
+        maxBuffer: Math.max(maxOutputBytes * 8, 1024 * 1024),
+        env: sanitizedCommandEnv()
+      }, (error, stdout, stderr) => {
+        const timedOut = Boolean(error && "killed" in error && error.killed);
+        const exitCode = typeof error === "object" && error && "code" in error && typeof error.code === "number"
+          ? error.code
+          : timedOut
+            ? 124
+            : 0;
+        resolveResult({
+          command: input.command,
+          args: input.args ?? [],
+          cwd,
+          exitCode,
+          stdout: capOutput(redactSecrets(stdout), maxOutputBytes),
+          stderr: capOutput(redactSecrets(stderr), maxOutputBytes),
+          durationMs: Date.now() - startedAt,
+          timedOut
+        });
+      });
+    });
+
+    await appendCommandResultTrace(workspace, result);
+    if (result.exitCode !== 0) {
+      throw new Error(`Command failed with exit code ${result.exitCode}: ${input.command}`);
+    }
+    return result;
+  }
+
   private assertInsideCreatedRun(path: string, label: string): string {
     for (const root of this.createdRoots) {
       try {
@@ -67,4 +113,60 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
     }
     throw new Error(`${label} is not inside a known workspace root: ${path}`);
   }
+}
+
+function resolveCommandCwd(workspace: Workspace, cwd = "."): string {
+  let rootCandidate: string;
+  try {
+    rootCandidate = cwd.startsWith("workspace/") || cwd.startsWith("final-package/")
+      ? safeJoin(workspace.rootDir, cwd)
+      : safeJoin(workspace.workspaceDir, cwd);
+  } catch {
+    throw new Error(`Command cwd must stay inside workspace or final package: ${cwd}`);
+  }
+  const resolved = resolve(rootCandidate);
+  const workspaceDir = resolve(workspace.workspaceDir);
+  const finalPackageDir = resolve(workspace.finalPackageDir);
+  if (
+    resolved !== workspaceDir &&
+    !resolved.startsWith(workspaceDir + sep) &&
+    resolved !== finalPackageDir &&
+    !resolved.startsWith(finalPackageDir + sep)
+  ) {
+    throw new Error(`Command cwd must stay inside workspace or final package: ${cwd}`);
+  }
+  return resolved;
+}
+
+function sanitizedCommandEnv(): NodeJS.ProcessEnv {
+  const keep = ["PATH", "Path", "PATHEXT", "SystemRoot", "TEMP", "TMP", "HOME", "USERPROFILE", "ComSpec"];
+  return Object.fromEntries(keep.flatMap((key) => process.env[key] ? [[key, process.env[key] as string]] : []));
+}
+
+function capOutput(value: string, maxBytes: number): string {
+  const buffer = Buffer.from(value);
+  if (buffer.byteLength <= maxBytes) {
+    return value;
+  }
+  return `${buffer.subarray(0, maxBytes).toString("utf8")}\n[truncated]`;
+}
+
+async function appendCommandResultTrace(workspace: Workspace, result: RunCommandResult): Promise<void> {
+  const record = {
+    timestamp: new Date().toISOString(),
+    command: result.command,
+    args: result.args ?? [],
+    cwd: result.cwd,
+    exitCode: result.exitCode,
+    stdoutPreview: result.stdout,
+    stderrPreview: result.stderr,
+    durationMs: result.durationMs,
+    timedOut: result.timedOut
+  };
+  const statePath = safeJoin(workspace.rootDir, "state/command-results.jsonl");
+  const tracePath = safeJoin(workspace.finalPackageDir, "trace/command-results.jsonl");
+  await mkdir(dirname(statePath), { recursive: true });
+  await mkdir(dirname(tracePath), { recursive: true });
+  await appendFile(statePath, `${JSON.stringify(record)}\n`, "utf8");
+  await appendFile(tracePath, `${JSON.stringify(record)}\n`, "utf8");
 }

@@ -79,6 +79,7 @@ Use the package scripts that exist in `package.json`:
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm eval:mock
 pnpm demo "Build an inventory request system for a flower company" --mock
 pnpm agentsim run "Build an inventory request system for a flower company" --mock
 pnpm agentsim dashboard <runId>

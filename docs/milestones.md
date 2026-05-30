@@ -46,10 +46,12 @@ Current capabilities:
 - Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
 - Deterministic task graph compilation from the current `AgentStep` registry.
 - Local run, task, artifact, message, event, and approval state persistence.
+- Real local resume from persisted run state after approvals are resolved.
 - Scheduler helpers for dependency-ready, blocked, failed, and terminal task state.
 - State transition helpers for run and task lifecycles.
 - Risk-aware local tool wrappers for workspace files, artifacts, commands, and human approval requests.
 - CLI inspection commands for runs, events, artifacts, tasks, and approvals.
+- Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
 - Structured agent messages, agent action records, artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
@@ -78,6 +80,7 @@ Acceptance:
 - Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, events, decisions, approvals, lineage, and run summary.
 - Every run has persisted run, task, artifact, message, event, and approval state.
 - Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim events`, `agentsim artifacts`, and `agentsim approvals`.
+- Approval-paused runs can continue with `agentsim approve` followed by `agentsim resume`.
 - The code still defaults to local filesystem and mock mode without keys.
 
 Do not build:
@@ -98,6 +101,11 @@ Build:
 - Capture command results into `trace/command-results.jsonl`.
 - Add a small repair loop for common generated-app failures.
 - Add `test-report.md` to the app package.
+
+Current implementation note:
+
+- The safe command runner exists, but automatic generated-app command execution remains disabled by default.
+- Repair-loop plumbing exists, but automatic fix execution is still intentionally limited.
 
 Acceptance:
 

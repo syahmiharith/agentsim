@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { getAgent } from "./agents/agents.js";
 import { agentSteps as defaultAgentSteps } from "./agents/steps.js";
 import { FileArtifactStore } from "./core/artifacts.js";
@@ -8,9 +8,11 @@ import { CompositeEventStore, JsonlEventStore } from "./core/events.js";
 import { validateFinalPackage as defaultValidateFinalPackage } from "./core/final-package-validation.js";
 import { safeJoin } from "./core/paths.js";
 import { redactSecrets } from "./core/redact.js";
-import { LocalApprovalsRepo, LocalArtifactsRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
+import { LocalAgentActionsRepo, LocalApprovalsRepo, LocalArtifactsRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
+import { createFixTask, reviewResultFromValidation } from "./core/review-loop.js";
 import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, markReadyTasks } from "./core/scheduler.js";
 import { compileAgentStepsToTasks } from "./core/task-compiler.js";
+import { createToolRuntime, hasApprovedAction, requestToolApproval } from "./core/tool-runtime.js";
 import { ToolApprovalRequiredError } from "./core/tools.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
@@ -28,12 +30,9 @@ import type {
   EventStore,
   ModelProvider,
   Run,
-  RunStatus,
   RunSummary,
   Task,
   TaskRun,
-  TaskStatus,
-  ValidationResult,
   Workspace,
   WorkspaceDriver
 } from "./types.js";
@@ -57,6 +56,8 @@ export interface RunOrchestratorOptions extends RunDemoOptions {
   agentSteps?: AgentStep[];
   domainPack?: DomainPack;
   validateFinalPackage?: typeof defaultValidateFinalPackage;
+  allowCommands?: boolean;
+  enableRepairLoop?: boolean;
 }
 
 export type TaskExecutionResult =
@@ -77,6 +78,7 @@ interface OrchestratorRuntime {
   runsRepo: LocalRunsRepo;
   tasksRepo: LocalTasksRepo;
   artifactsRepo: LocalArtifactsRepo;
+  agentActionsRepo: LocalAgentActionsRepo;
   messagesRepo: LocalMessagesRepo;
   approvalsRepo: LocalApprovalsRepo;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
@@ -84,6 +86,9 @@ interface OrchestratorRuntime {
   agentMessages: AgentMessageRecord[];
   decisions: Decision[];
   steps: AgentStep[];
+  validateFinalPackage: typeof defaultValidateFinalPackage;
+  allowCommands: boolean;
+  enableRepairLoop: boolean;
 }
 
 export async function runOrchestrator(options: RunOrchestratorOptions): Promise<RunDemoResult> {
@@ -92,7 +97,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const safeGoal = redactSecrets(options.goal);
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(runId, outputRoot);
-  const eventStore = new CompositeEventStore([
+  const eventStore = new CompositeEventStore(runId, [
     new JsonlEventStore(runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl")),
     new JsonlEventStore(runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
   ]);
@@ -100,12 +105,12 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const runsRepo = new LocalRunsRepo(workspace.rootDir);
   const tasksRepo = new LocalTasksRepo(workspace.rootDir);
   const artifactsRepo = new LocalArtifactsRepo(workspace.rootDir);
+  const agentActionsRepo = new LocalAgentActionsRepo(workspace.rootDir);
   const messagesRepo = new LocalMessagesRepo(workspace.rootDir);
   const approvalsRepo = new LocalApprovalsRepo(workspace.rootDir);
   const domainPack = options.domainPack ?? softwareFreelancePack;
   const domainSpec = domainPack.inferDomainSpec(safeGoal);
   const steps = options.agentSteps ?? defaultAgentSteps;
-  const validateFinalPackage = options.validateFinalPackage ?? defaultValidateFinalPackage;
   const decisions: Decision[] = [];
   const agentActions: AgentActionRecord[] = [];
   const agentMessages: AgentMessageRecord[] = [];
@@ -132,76 +137,24 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     runsRepo,
     tasksRepo,
     artifactsRepo,
+    agentActionsRepo,
     messagesRepo,
     approvalsRepo,
     artifactsByType,
     agentActions,
     agentMessages,
     decisions,
-    steps
+    steps,
+    validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
+    allowCommands: options.allowCommands ?? false,
+    enableRepairLoop: options.enableRepairLoop ?? false
   };
 
   try {
     await initializeRun(runtime, taskRun);
     await maybeCreateLiveRunBrief(runtime);
     await runSchedulerLoop(runtime);
-    await exportFinalPackageArtifacts(runtime);
-    await writeTraceFiles(runtime);
-    const validationResult = await validateFinalPackage({
-      finalPackageDir: workspace.finalPackageDir,
-      artifacts: artifactStore.list(),
-      domainPack
-    });
-
-    if (!validationResult.ok) {
-      taskRun.status = "REVIEW_FAILED";
-      taskRun.failureReason = "VALIDATION_FAILED";
-      taskRun.completedAt = new Date().toISOString();
-      await writeRunSummary({
-        runId,
-        goal: safeGoal,
-        status: taskRun.status,
-        modelMode: taskRun.modelMode,
-        provider: options.modelProvider.name,
-        finalPackageDir: workspace.finalPackageDir,
-        artifactCount: artifactStore.list().length,
-        validationResult,
-        failures: validationResult.failures
-      }, workspace.finalPackageDir);
-      await failRun(runtime, "VALIDATION_FAILED", "Final package validation failed.", { failures: validationResult.failures });
-      throw new Error(`Final package validation failed: ${validationResult.failures.join("; ")}`);
-    }
-
-    taskRun.status = "COMPLETED";
-    taskRun.completedAt = new Date().toISOString();
-    await runsRepo.updateRunStatus("completed");
-    await writeRunSummary({
-      runId,
-      goal: safeGoal,
-      status: taskRun.status,
-      modelMode: taskRun.modelMode,
-      provider: options.modelProvider.name,
-      finalPackageDir: workspace.finalPackageDir,
-      artifactCount: artifactStore.list().length,
-      validationResult,
-      failures: []
-    }, workspace.finalPackageDir);
-    await eventStore.append({
-      level: "info",
-      name: "run.completed",
-      agentId: "delivery",
-      artifactId: artifactsByType["handoff-notes"]?.id,
-      message: "Completed Agentsim demo run.",
-      data: { finalPackageDir: workspace.finalPackageDir }
-    });
-
-    return {
-      taskRun,
-      finalPackageDir: workspace.finalPackageDir,
-      artifacts: artifactStore.list(),
-      decisions,
-      domainSpec
-    };
+    return await completeRun(runtime, taskRun);
   } catch (error) {
     if (error instanceof RunWaitingForApprovalError) {
       taskRun.status = "WAITING_HUMAN_APPROVAL";
@@ -233,6 +186,226 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     }
     throw error;
   }
+}
+
+export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "goal" | "runId"> & { runId: string }): Promise<RunDemoResult> {
+  const outputRoot = options.outputRoot ?? "outputs";
+  const runRoot = resolve(outputRoot, options.runId);
+  await assertRunExists(runRoot, options.runId);
+
+  const runsRepo = new LocalRunsRepo(runRoot);
+  const existingRun = await runsRepo.getRun();
+  if (existingRun.status === "completed" || existingRun.status === "failed" || existingRun.status === "cancelled") {
+    throw new Error(`Run ${options.runId} cannot be resumed from terminal status ${existingRun.status}.`);
+  }
+
+  const approvalsRepo = new LocalApprovalsRepo(runRoot);
+  const pendingApprovals = (await approvalsRepo.listApprovalsByRun()).filter((approval) => approval.status === "pending");
+  if (pendingApprovals.length > 0) {
+    throw new Error(`Run ${options.runId} still has pending approvals: ${pendingApprovals.map((approval) => approval.id).join(", ")}`);
+  }
+
+  const driver = new LocalFilesystemWorkspaceDriver();
+  const workspace = await driver.create(options.runId, outputRoot);
+  const eventStore = new CompositeEventStore(options.runId, [
+    new JsonlEventStore(options.runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl")),
+    new JsonlEventStore(options.runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
+  ]);
+  const tasksRepo = new LocalTasksRepo(runRoot);
+  const artifactsRepo = new LocalArtifactsRepo(runRoot);
+  const agentActionsRepo = new LocalAgentActionsRepo(runRoot);
+  const messagesRepo = new LocalMessagesRepo(runRoot);
+  const artifacts = await artifactsRepo.listArtifactsByRun();
+  const artifactStore = new FileArtifactStore(workspace, artifacts);
+  const domainPack = options.domainPack ?? softwareFreelancePack;
+  const domainSpec = domainPack.inferDomainSpec(existingRun.userGoal);
+  const steps = options.agentSteps ?? defaultAgentSteps;
+  const existingTasks = await tasksRepo.listTasksByRun();
+  if (existingTasks.length === 0) {
+    await tasksRepo.saveTasks(compileAgentStepsToTasks(options.runId, steps));
+  }
+
+  for (const task of await tasksRepo.listTasksByRun()) {
+    if (task.status === "waiting_for_approval") {
+      await tasksRepo.updateTaskStatus(task.id, "ready");
+    }
+  }
+  await runsRepo.updateRunStatus("running");
+
+  const decisions: Decision[] = [
+    {
+      id: "domain-spec",
+      runId: options.runId,
+      madeAt: new Date().toISOString(),
+      madeBy: "system",
+      title: "Domain inference",
+      rationale: `Inferred ${domainSpec.domain} from the persisted user goal and selected ${domainSpec.primaryEntity.name} as the primary workflow entity.`,
+      selectedOption: domainSpec.appName
+    },
+    {
+      id: "model-provider",
+      runId: options.runId,
+      madeAt: new Date().toISOString(),
+      madeBy: "system",
+      title: "Model provider selection",
+      rationale: "Resumed an existing local run with the configured model provider.",
+      selectedOption: options.modelProvider.mode
+    }
+  ];
+  const agentActions = await agentActionsRepo.listActionsByRun();
+  const agentMessages = await messagesRepo.listMessagesByRun();
+  const artifactsByType = Object.fromEntries(artifacts.map((artifact) => [artifact.type, artifact])) as Partial<Record<ArtifactType, Artifact>>;
+  const runtime: OrchestratorRuntime = {
+    runId: options.runId,
+    safeGoal: existingRun.userGoal,
+    modelProvider: options.modelProvider,
+    domainPack,
+    domainSpec,
+    workspace,
+    workspaceDriver: driver,
+    artifactStore,
+    eventStore,
+    runsRepo,
+    tasksRepo,
+    artifactsRepo,
+    agentActionsRepo,
+    messagesRepo,
+    approvalsRepo,
+    artifactsByType,
+    agentActions,
+    agentMessages,
+    decisions,
+    steps,
+    validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
+    allowCommands: options.allowCommands ?? false,
+    enableRepairLoop: options.enableRepairLoop ?? false
+  };
+
+  const taskRun: TaskRun = {
+    id: options.runId,
+    goal: existingRun.userGoal,
+    startedAt: existingRun.createdAt,
+    status: "RUNNING",
+    modelMode: options.modelProvider.mode,
+    outputDir: workspace.rootDir
+  };
+
+  await eventStore.append({
+    level: "info",
+    name: "run.resumed",
+    message: `Resumed Agentsim run ${options.runId}.`
+  });
+
+  try {
+    await runSchedulerLoop(runtime);
+    return completeRun(runtime, taskRun);
+  } catch (error) {
+    if (error instanceof RunWaitingForApprovalError) {
+      taskRun.status = "WAITING_HUMAN_APPROVAL";
+      return {
+        taskRun,
+        finalPackageDir: workspace.finalPackageDir,
+        artifacts: artifactStore.list(),
+        decisions,
+        domainSpec
+      };
+    }
+    taskRun.status = "FAILED";
+    taskRun.failureReason = "UNKNOWN";
+    taskRun.completedAt = new Date().toISOString();
+    throw error;
+  }
+}
+
+async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Promise<RunDemoResult> {
+  await exportFinalPackageArtifacts(runtime);
+  await writeTraceFiles(runtime);
+  const validationResult = await runtime.validateFinalPackage({
+    finalPackageDir: runtime.workspace.finalPackageDir,
+    artifacts: runtime.artifactStore.list(),
+    domainPack: runtime.domainPack
+  });
+  const reviewResult = reviewResultFromValidation(validationResult);
+
+  if (reviewResult.verdict === "revise" && runtime.enableRepairLoop) {
+    const reviewTask = (await runtime.tasksRepo.listTasksByRun()).find((task) => task.kind === "review") ?? (await runtime.tasksRepo.listTasksByRun()).at(-1);
+    if (reviewTask) {
+      const fixTask = createFixTask({
+        runId: runtime.runId,
+        reviewTask,
+        reviewResult,
+        reviewCycle: reviewTask.reviewCycle ?? 1
+      });
+      await runtime.tasksRepo.createTask(fixTask);
+      await runtime.eventStore.append({
+        level: "warn",
+        name: "review.fix_task_created",
+        taskId: fixTask.id,
+        message: "Created a bounded fix task from validation review.",
+        data: { requiredFixes: reviewResult.requiredFixes }
+      });
+    }
+    await failRun(runtime, "REPAIR_NOT_IMPLEMENTED", "Repair loop created a fix task, but fix task execution is not implemented yet.", { reviewResult });
+    throw new Error("Repair loop created a fix task, but fix task execution is not implemented yet.");
+  }
+
+  if (!validationResult.ok) {
+    taskRun.status = "REVIEW_FAILED";
+    taskRun.failureReason = "VALIDATION_FAILED";
+    taskRun.completedAt = new Date().toISOString();
+    await writeRunSummary({
+      runId: runtime.runId,
+      goal: runtime.safeGoal,
+      status: taskRun.status,
+      modelMode: taskRun.modelMode,
+      provider: runtime.modelProvider.name,
+      finalPackageDir: runtime.workspace.finalPackageDir,
+      artifactCount: runtime.artifactStore.list().length,
+      validationResult,
+      failures: validationResult.failures
+    }, runtime.workspace.finalPackageDir);
+    if (reviewResult.verdict === "revise") {
+      await runtime.eventStore.append({
+        level: "warn",
+        name: "review.repair_loop_disabled",
+        message: "Validation produced recoverable review failures, but repair loop is disabled.",
+        data: { reviewResult }
+      });
+    }
+    await failRun(runtime, "VALIDATION_FAILED", reviewResult.summary, { failures: validationResult.failures, reviewResult });
+    throw new Error(`Final package validation failed: ${validationResult.failures.join("; ")}`);
+  }
+
+  taskRun.status = "COMPLETED";
+  taskRun.completedAt = new Date().toISOString();
+  await runtime.runsRepo.updateRunStatus("completed");
+  await writeRunSummary({
+    runId: runtime.runId,
+    goal: runtime.safeGoal,
+    status: taskRun.status,
+    modelMode: taskRun.modelMode,
+    provider: runtime.modelProvider.name,
+    finalPackageDir: runtime.workspace.finalPackageDir,
+    artifactCount: runtime.artifactStore.list().length,
+    validationResult,
+    failures: []
+  }, runtime.workspace.finalPackageDir);
+  await runtime.eventStore.append({
+    level: "info",
+    name: "run.completed",
+    agentId: "delivery",
+    artifactId: runtime.artifactsByType["handoff-notes"]?.id,
+    message: "Completed Agentsim demo run.",
+    data: { finalPackageDir: runtime.workspace.finalPackageDir }
+  });
+
+  return {
+    taskRun,
+    finalPackageDir: runtime.workspace.finalPackageDir,
+    artifacts: runtime.artifactStore.list(),
+    decisions: runtime.decisions,
+    domainSpec: runtime.domainSpec
+  };
 }
 
 export async function executeTask(runtime: OrchestratorRuntime, taskId: string): Promise<TaskExecutionResult> {
@@ -305,6 +478,19 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     workspace: runtime.workspace,
     workspaceDriver: runtime.workspaceDriver,
     artifactsByType: runtime.artifactsByType,
+    tools: createToolRuntime({
+      runId: runtime.runId,
+      workspace: runtime.workspace,
+      workspaceDriver: runtime.workspaceDriver,
+      eventStore: runtime.eventStore,
+      artifactStore: runtime.artifactStore,
+      artifactsRepo: runtime.artifactsRepo,
+      approvalsRepo: runtime.approvalsRepo,
+      modelMode: runtime.modelProvider.mode,
+      allowCommands: runtime.allowCommands,
+      hasApproval: (action) => hasApprovedAction(action, runtime.approvalsRepo),
+      requestApproval: (approval) => requestToolApproval(runtime.runId, runtime.approvalsRepo, { ...approval, taskId: approval.taskId ?? task.id })
+    }),
     currentMessages
   };
 
@@ -380,7 +566,9 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     return { status: "completed", artifact, actionRecord, messages: currentMessages };
   } catch (error) {
     if (error instanceof ToolApprovalRequiredError) {
-      const approval = await runtime.approvalsRepo.createApproval({
+      const existing = (await runtime.approvalsRepo.listApprovalsByRun())
+        .find((approval) => approval.action === error.action && approval.status === "pending");
+      const approval = existing ?? await runtime.approvalsRepo.createApproval({
         runId: runtime.runId,
         taskId: task.id,
         requestedBy: step.ownerAgentId,
@@ -415,6 +603,7 @@ export async function handleTaskResult(runtime: OrchestratorRuntime, taskId: str
     await runtime.artifactsRepo.createArtifactRecord(result.artifact);
     runtime.artifactsByType[result.artifact.type] = result.artifact;
     runtime.agentActions.push(result.actionRecord);
+    await runtime.agentActionsRepo.createAction(result.actionRecord);
     runtime.agentMessages.push(...result.messages);
     await runtime.tasksRepo.updateTaskStatus(taskId, "completed");
     await runtime.eventStore.append({
@@ -454,6 +643,7 @@ export async function retryOrFailTask(runtime: OrchestratorRuntime, taskId: stri
   const task = await runtime.tasksRepo.getTask(taskId);
   const message = error instanceof Error ? redactSecrets(error.message) : "Unknown task failure.";
   if (task.attempts < task.maxAttempts) {
+    await runtime.tasksRepo.updateTaskStatus(taskId, "failed", message);
     await runtime.tasksRepo.updateTaskStatus(taskId, "ready", message);
     await runtime.eventStore.append({
       level: "warn",
@@ -707,6 +897,14 @@ async function safeGetRun(runsRepo: LocalRunsRepo): Promise<Run | undefined> {
     return await runsRepo.getRun();
   } catch {
     return undefined;
+  }
+}
+
+async function assertRunExists(runRoot: string, runId: string): Promise<void> {
+  try {
+    await stat(safeJoin(runRoot, "state/run.json"));
+  } catch {
+    throw new Error(`Run ${runId} does not exist or is missing persisted state.`);
   }
 }
 

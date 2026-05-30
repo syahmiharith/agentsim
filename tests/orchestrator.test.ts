@@ -2,7 +2,8 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runOrchestrator } from "../src/orchestrator.js";
+import { resumeOrchestrator, runOrchestrator } from "../src/orchestrator.js";
+import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "../src/core/repositories.js";
 import { ToolApprovalRequiredError } from "../src/core/tools.js";
 import { MockModelProvider } from "../src/providers/mock-model-provider.js";
 import type { AgentStep, ValidationResult } from "../src/types.js";
@@ -126,6 +127,123 @@ describe("scheduler-driven orchestrator", () => {
     expect(run.status).toBe("waiting_for_approval");
     expect(tasks[0].status).toBe("waiting_for_approval");
     expect(approvals[0]).toMatchObject({ status: "pending", action: "dangerous command" });
+  });
+
+  it("approves and resumes the same paused run to completion", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-resume-"));
+    let shouldPause = true;
+    const gatedStep: AgentStep = {
+      ...testStep("client-proposal", "proposal", [], "client/proposal.md"),
+      async execute(context) {
+        if (shouldPause) {
+          await context.tools?.askHuman({ action: "approve proposal", requestedBy: "client-intake" });
+        }
+        return {
+          content: "# proposal\n\nApproved.",
+          workspaceRelativePath: "artifacts/proposal.md",
+          finalPackagePath: "client/proposal.md",
+          status: "approved",
+          reviewStatus: "not_required",
+          approvalStatus: "approved",
+          outputSource: "template"
+        };
+      }
+    };
+
+    const paused = await runOrchestrator({
+      goal: "Build a resumable app",
+      outputRoot,
+      runId: "resume-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [gatedStep, testStep("delivery-user-guide", "user-guide", ["proposal"], "client/user-guide.md")],
+      validateFinalPackage: async () => okValidation()
+    });
+    expect(paused.taskRun.status).toBe("WAITING_HUMAN_APPROVAL");
+
+    const runRoot = join(outputRoot, "resume-run");
+    const approvalsRepo = new LocalApprovalsRepo(runRoot);
+    const tasksRepo = new LocalTasksRepo(runRoot);
+    const runsRepo = new LocalRunsRepo(runRoot);
+    const approval = (await approvalsRepo.listApprovalsByRun())[0];
+    await approvalsRepo.updateApprovalStatus(approval.id, "approved");
+    await tasksRepo.updateTaskStatus(approval.taskId ?? "", "ready");
+    await runsRepo.updateRunStatus("running");
+    shouldPause = false;
+
+    const resumed = await resumeOrchestrator({
+      outputRoot,
+      runId: "resume-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [gatedStep, testStep("delivery-user-guide", "user-guide", ["proposal"], "client/user-guide.md")],
+      validateFinalPackage: async () => okValidation()
+    });
+
+    const run = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "run.json"), "utf8"));
+    const tasks = JSON.parse(await readFile(join(outputRoot, "resume-run", "state", "tasks.json"), "utf8"));
+    expect(resumed.taskRun.status).toBe("COMPLETED");
+    expect(run.status).toBe("completed");
+    expect(tasks.every((task: { status: string }) => task.status === "completed")).toBe(true);
+  });
+
+  it("refuses resume with pending approvals or terminal runs", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-resume-refuse-"));
+    await runOrchestrator({
+      goal: "Build an approval-gated tool",
+      outputRoot,
+      runId: "pending-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [{
+        ...testStep("client-proposal", "proposal", [], "client/proposal.md"),
+        async execute() {
+          throw new ToolApprovalRequiredError("ask_human", "pending approval");
+        }
+      }],
+      validateFinalPackage: async () => okValidation()
+    });
+
+    await expect(resumeOrchestrator({
+      outputRoot,
+      runId: "pending-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("client-proposal", "proposal", [], "client/proposal.md")],
+      validateFinalPackage: async () => okValidation()
+    })).rejects.toThrow("still has pending approvals");
+
+    const completedRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-resume-completed-"));
+    await runOrchestrator({
+      goal: "Build a complete app",
+      outputRoot: completedRoot,
+      runId: "completed-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("client-proposal", "proposal", [], "client/proposal.md")],
+      validateFinalPackage: async () => okValidation()
+    });
+    await expect(resumeOrchestrator({
+      outputRoot: completedRoot,
+      runId: "completed-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("client-proposal", "proposal", [], "client/proposal.md")],
+      validateFinalPackage: async () => okValidation()
+    })).rejects.toThrow("cannot be resumed from terminal status completed");
+  });
+
+  it("emits repair-loop events for recoverable validation failures", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-repair-"));
+
+    await expect(runOrchestrator({
+      goal: "Build a repairable package",
+      outputRoot,
+      runId: "repair-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [testStep("review-qa-report", "qa-report", [], "review/qa-report.md")],
+      validateFinalPackage: async () => ({ ok: false, failures: ["Missing required final-package file: client/user-guide.md"] }),
+      enableRepairLoop: true
+    })).rejects.toThrow("Repair loop created a fix task");
+
+    const tasks = JSON.parse(await readFile(join(outputRoot, "repair-run", "state", "tasks.json"), "utf8"));
+    const events = await readFile(join(outputRoot, "repair-run", "state", "events.jsonl"), "utf8");
+    expect(tasks.some((task: { kind: string }) => task.kind === "fix")).toBe(true);
+    expect(events).toContain("review.fix_task_created");
   });
 });
 

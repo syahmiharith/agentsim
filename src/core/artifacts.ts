@@ -6,9 +6,14 @@ import { sha256 } from "./hash.js";
 import { assertPathInside, safeJoin } from "./paths.js";
 
 export class FileArtifactStore implements ArtifactStore {
-  private readonly artifacts: Artifact[] = [];
+  private readonly artifacts: Artifact[];
 
-  constructor(private readonly workspace: Workspace) {}
+  constructor(
+    private readonly workspace: Workspace,
+    initialArtifacts: Artifact[] = []
+  ) {
+    this.artifacts = [...initialArtifacts];
+  }
 
   async createMarkdown(input: CreateArtifactInput): Promise<Artifact> {
     const now = new Date().toISOString();

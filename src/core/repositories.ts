@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AgentMessageRecord, Approval, Artifact, Event, Run, RunStatus, Task, TaskStatus } from "../types.js";
+import type { AgentActionRecord, AgentMessageRecord, Approval, Artifact, ContextPackage, Event, Run, RunStatus, Task, TaskStatus } from "../types.js";
 import { safeJoin } from "./paths.js";
 import { redactRecord, redactSecrets } from "./redact.js";
+import { transitionRun, transitionTask } from "./state-machines.js";
 
 export class LocalRunsRepo {
   constructor(private readonly runRoot: string) {}
@@ -24,14 +25,9 @@ export class LocalRunsRepo {
 
   async updateRunStatus(status: RunStatus, failureReason?: string): Promise<Run> {
     const run = await this.getRun();
-    const now = new Date().toISOString();
-    const updated: Run = {
-      ...run,
-      status,
-      updatedAt: now,
-      completedAt: status === "completed" || status === "failed" || status === "cancelled" ? now : run.completedAt,
-      failureReason
-    };
+    const updated = run.status === status
+      ? { ...run, failureReason: failureReason ?? run.failureReason, updatedAt: new Date().toISOString() }
+      : transitionRun(run, status, { failureReason });
     await this.saveRun(updated);
     return updated;
   }
@@ -70,13 +66,9 @@ export class LocalTasksRepo {
       if (task.id !== taskId) {
         return task;
       }
-      updatedTask = {
-        ...task,
-        status,
-        updatedAt: now,
-        completedAt: status === "completed" || status === "failed" || status === "cancelled" ? now : task.completedAt,
-        failureReason
-      };
+      updatedTask = task.status === status
+        ? { ...task, failureReason: failureReason ?? task.failureReason, updatedAt: now }
+        : transitionTask(task, status, { failureReason });
       return updatedTask;
     });
     if (!updatedTask) {
@@ -131,6 +123,42 @@ export class LocalArtifactsRepo {
 
   async listArtifactsByRun(): Promise<Artifact[]> {
     return readJson<Artifact[]>(this.path("artifacts.json"), []);
+  }
+
+  private path(relativePath: string): string {
+    return safeJoin(join(this.runRoot, "state"), relativePath);
+  }
+}
+
+export class LocalAgentActionsRepo {
+  constructor(private readonly runRoot: string) {}
+
+  async createAction(action: AgentActionRecord): Promise<AgentActionRecord> {
+    const actions = await this.listActionsByRun();
+    await writeJson(this.path("agent-actions.json"), [...actions.filter((candidate) => candidate.id !== action.id), action]);
+    return action;
+  }
+
+  async listActionsByRun(): Promise<AgentActionRecord[]> {
+    return readJson<AgentActionRecord[]>(this.path("agent-actions.json"), []);
+  }
+
+  private path(relativePath: string): string {
+    return safeJoin(join(this.runRoot, "state"), relativePath);
+  }
+}
+
+export class LocalContextPackagesRepo {
+  constructor(private readonly runRoot: string) {}
+
+  async createContextPackage(contextPackage: ContextPackage): Promise<ContextPackage> {
+    const packages = await this.listContextPackagesByRun();
+    await writeJson(this.path("context-packages.json"), [...packages.filter((candidate) => candidate.id !== contextPackage.id), contextPackage]);
+    return contextPackage;
+  }
+
+  async listContextPackagesByRun(): Promise<ContextPackage[]> {
+    return readJson<ContextPackage[]>(this.path("context-packages.json"), []);
   }
 
   private path(relativePath: string): string {

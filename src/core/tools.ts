@@ -1,10 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { ArtifactType, CreateArtifactInput, RunCommandResult, ToolContext, ToolDefinition } from "../types.js";
-import { FileArtifactStore } from "./artifacts.js";
 import { safeJoin } from "./paths.js";
-
-const execFileAsync = promisify(execFile);
 
 export class ToolApprovalRequiredError extends Error {
   constructor(
@@ -59,8 +54,11 @@ export const createArtifactTool: ToolDefinition<CreateArtifactInput, { id: strin
   requiresApproval: false,
   async execute(input, context) {
     await emitToolCalled(context, "create_artifact", input.finalPackagePath);
-    const store = new FileArtifactStore(context.workspace);
-    const artifact = await store.createMarkdown(input);
+    if (!context.artifactStore) {
+      throw new Error("create_artifact requires an active artifact store.");
+    }
+    const artifact = await context.artifactStore.createMarkdown(input);
+    await context.artifactsRepo?.createArtifactRecord(artifact);
     return { id: artifact.id, type: artifact.type };
   }
 };
@@ -81,13 +79,10 @@ export const runCommandTool: ToolDefinition<{ command: string; args?: string[] }
       throw new Error("run_command is disabled unless allowCommands is true.");
     }
 
-    const result = await execFileAsync(input.command, input.args ?? [], { cwd: context.workspace.workspaceDir });
-    return {
-      command: action,
-      exitCode: 0,
-      stdout: result.stdout,
-      stderr: result.stderr
-    };
+    if (!context.workspaceDriver.runCommand) {
+      throw new Error("run_command is not supported by this workspace driver.");
+    }
+    return context.workspaceDriver.runCommand(context.workspace, input);
   }
 };
 
@@ -101,14 +96,14 @@ export const askHumanTool: ToolDefinition<{ action: string; taskId?: string; req
     if (!context.requestApproval) {
       throw new ToolApprovalRequiredError("ask_human", input.action);
     }
-    const approval = await context.requestApproval({
+    await context.requestApproval({
       taskId: input.taskId,
       requestedBy: input.requestedBy,
       action: input.action,
       riskLevel: "high",
       notes: input.notes ?? "Human decision requested."
     });
-    throw new ToolApprovalRequiredError("ask_human", approval.id);
+    throw new ToolApprovalRequiredError("ask_human", input.action);
   }
 };
 
@@ -125,7 +120,7 @@ async function requireApproval<I, O>(tool: ToolDefinition<I, O>, action: string,
   if (!tool.requiresApproval) {
     return;
   }
-  if (context.hasApproval?.(action)) {
+  if (await context.hasApproval?.(action)) {
     return;
   }
   if (context.requestApproval) {

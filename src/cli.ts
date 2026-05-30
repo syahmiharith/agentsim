@@ -8,6 +8,7 @@ import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "./core/reposi
 import { loadRunInspection, renderApprovals, renderArtifacts, renderEvents, renderInspect, renderTasks } from "./inspection.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
 import { startDashboard } from "./tui/run-inspector.js";
+import { resumeOrchestrator } from "./orchestrator.js";
 import { runDemo } from "./workflow.js";
 
 type CliCommand = "run" | "demo" | "dashboard" | "tui" | "inspect" | "events" | "artifacts" | "tasks" | "approvals" | "approve" | "reject" | "resume";
@@ -94,8 +95,16 @@ export async function main(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    await resumeRun(resolve(options.outputRoot), options.runId ?? options.goal ?? "");
-    console.log(`Run ${options.runId ?? options.goal} resumed.`);
+    const provider = createModelProvider(options.providerSelection);
+    const result = await resumeOrchestrator({
+      outputRoot: resolve(options.outputRoot),
+      runId: options.runId ?? options.goal ?? "",
+      modelProvider: provider
+    });
+    console.log(`Agentsim run resumed.`);
+    console.log(`Run ID: ${result.taskRun.id}`);
+    console.log(`Status: ${result.taskRun.status}`);
+    console.log(`Final package: ${result.finalPackageDir}`);
     return;
   }
 
@@ -284,19 +293,8 @@ async function resolveApproval(input: { outputRoot: string; runId: string; appro
       input.status === "approved" ? "ready" : "failed",
       input.status === "rejected" ? "Approval rejected." : undefined
     );
+    await runsRepo.updateRunStatus(input.status === "approved" ? "running" : "failed", input.status === "rejected" ? "Approval rejected." : undefined);
   }
-  await runsRepo.updateRunStatus(input.status === "approved" ? "running" : "failed", input.status === "rejected" ? "Approval rejected." : undefined);
-}
-
-async function resumeRun(outputRoot: string, runId: string): Promise<void> {
-  const runRoot = resolve(outputRoot, runId);
-  const approvalsRepo = new LocalApprovalsRepo(runRoot);
-  const runsRepo = new LocalRunsRepo(runRoot);
-  const pending = (await approvalsRepo.listApprovalsByRun()).filter((approval) => approval.status === "pending");
-  if (pending.length > 0) {
-    throw new Error(`Run ${runId} still has pending approvals: ${pending.map((approval) => approval.id).join(", ")}`);
-  }
-  await runsRepo.updateRunStatus("running");
 }
 
 function printUsage(): void {

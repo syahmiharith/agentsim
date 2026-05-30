@@ -38,7 +38,7 @@ export function transitionTask(task: Task, to: TaskStatus, metadata: { failureRe
     ...task,
     status: to,
     updatedAt: now,
-    completedAt: to === "completed" || to === "failed" || to === "cancelled" ? now : task.completedAt,
+    completedAt: to === "completed" || to === "failed" || to === "cancelled" ? now : undefined,
     failureReason: metadata.failureReason ?? (to === "failed" ? task.failureReason : undefined)
   };
 }
@@ -57,7 +57,7 @@ export function transitionRun(run: Run, to: RunStatus, metadata: { failureReason
     ...run,
     status: to,
     updatedAt: now,
-    completedAt: to === "completed" || to === "failed" || to === "cancelled" ? now : run.completedAt,
+    completedAt: to === "completed" || to === "failed" || to === "cancelled" ? now : undefined,
     failureReason: metadata.failureReason ?? (to === "failed" ? run.failureReason : undefined)
   };
 }

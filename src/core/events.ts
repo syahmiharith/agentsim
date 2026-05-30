@@ -20,6 +20,10 @@ export class JsonlEventStore implements EventStore {
       data: input.data ? redactRecord(input.data) : undefined
     };
 
+    return this.appendExisting(event);
+  }
+
+  async appendExisting(event: Event): Promise<Event> {
     await mkdir(dirname(this.eventsPath), { recursive: true });
     await appendFile(this.eventsPath, `${JSON.stringify(event)}\n`, "utf8");
     return event;
@@ -27,16 +31,25 @@ export class JsonlEventStore implements EventStore {
 }
 
 export class CompositeEventStore implements EventStore {
-  constructor(private readonly stores: EventStore[]) {}
+  constructor(
+    private readonly runId: string,
+    private readonly stores: JsonlEventStore[]
+  ) {}
 
   async append(input: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event> {
-    const [primary, ...rest] = this.stores;
-    if (!primary) {
+    if (this.stores.length === 0) {
       throw new Error("CompositeEventStore requires at least one event store.");
     }
 
-    const event = await primary.append(input);
-    await Promise.all(rest.map((store) => store.append(input)));
+    const event: Event = {
+      ...input,
+      id: randomUUID(),
+      runId: this.runId,
+      timestamp: new Date().toISOString(),
+      message: redactSecrets(input.message),
+      data: input.data ? redactRecord(input.data) : undefined
+    };
+    await Promise.all(this.stores.map((store) => store.appendExisting(event)));
     return event;
   }
 }

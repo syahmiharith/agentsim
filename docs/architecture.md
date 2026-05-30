@@ -8,7 +8,8 @@ The implementation is intentionally simple. Keep the current CLI vertical slice 
 
 ```text
 CLI
--> workflow
+-> workflow wrapper
+-> orchestrator
 -> domain pack
 -> task compiler
 -> scheduler
@@ -27,9 +28,9 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 
 | Module | Responsibility |
 | --- | --- |
-| `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, and `tui` command parsing and provider selection. |
-| `src/workflow.ts` | Coordinates the current end-to-end run from goal to final package. |
-| `src/orchestrator.ts` | Exposes task-oriented orchestration entry points used as the runtime foundation evolves. |
+| `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, `tui`, inspection, approval, and resume command parsing. |
+| `src/workflow.ts` | Preserves the existing `runDemo()` compatibility entry point. |
+| `src/orchestrator.ts` | Owns run creation, resume, scheduler execution, task execution, validation, approval pause, and final package completion. |
 | `src/types.ts` | Holds core contracts used across the CLI, workflow, artifacts, events, and providers. |
 | `src/agents/` | Defines the current software-freelance role set and artifact-producing step registry. |
 | `src/domain/` | Defines the software-freelance domain pack and deterministic domain-spec inference. |
@@ -38,11 +39,12 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | `src/core/events.ts` | Writes redacted JSONL event traces. |
 | `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, and lineage. |
 | `src/core/paths.ts` | Prevents absolute-path use and workspace escape for relative path operations. |
-| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, messages, events, and approvals. |
+| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, actions, messages, events, and approvals. |
 | `src/core/scheduler.ts` | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets. |
 | `src/core/state-machines.ts` | Validates allowed run and task status transitions. |
 | `src/core/task-compiler.ts` | Converts the existing `AgentStep` registry into a deterministic task graph. |
 | `src/core/tools.ts` | Wraps file, artifact, command, and approval tools with risk-aware execution rules. |
+| `src/core/tool-runtime.ts` | Injects the active tool runtime into agent execution using the current stores, repos, and workspace. |
 | `src/core/workspace.ts` | Provides the local filesystem workspace driver. |
 | `src/providers/` | Provides mock and Chat Completions-compatible model providers. |
 | `src/tui/run-inspector.ts` | Inspects completed runs from local outputs. |
@@ -106,11 +108,12 @@ pnpm agentsim approvals <runId>
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
 pnpm agentsim resume <runId>
+pnpm eval:mock
 ```
 
 ## Workflow Layer
 
-`src/workflow.ts` currently owns the end-to-end software-freelance demo run and mirrors state into the local repository layout.
+`src/workflow.ts` is now a compatibility wrapper. `src/orchestrator.ts` owns the end-to-end software-freelance run and persisted state.
 
 Main responsibilities:
 
@@ -118,18 +121,21 @@ Main responsibilities:
 - create event and artifact stores
 - create a persisted run record
 - compile `AgentStep` entries into persisted tasks
+- rehydrate existing run state for `resume`
 - mark dependency-ready tasks before execution
 - infer a `DomainSpec` through the domain pack
 - record provider and domain decisions
-- execute the artifact-producing agent step registry
+- execute tasks through the scheduler in deterministic compiled-step order
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
-- validate package completeness
+- validate package completeness and convert validation into a review verdict
 - update run and task state
 - write `trace/run-summary.json`
 - return run metadata to the CLI
 
-The first orchestration version remains sequential so the final package stays compatible. The scheduler and repositories are intentionally separate so later work can replace the static loop without changing the artifact contract.
+The current orchestration version remains sequential so the final package stays compatible. The scheduler and repositories are intentionally separate so later work can add richer execution without changing the artifact contract.
+
+`resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses.
 
 Keep workflow changes narrowly scoped. If behavior becomes reusable across future workflows, extract a small helper or interface only when it removes real duplication.
 
@@ -183,6 +189,7 @@ Internal state is persisted under:
 outputs/{runId}/state/
 +-- run.json
 +-- tasks.json
++-- agent-actions.json
 +-- messages.json
 +-- events.jsonl
 +-- artifacts.json
@@ -212,12 +219,21 @@ All relative workspace and artifact paths go through `safeJoin()`. Absolute path
 The risk-aware tool runtime defines `read_file`, `write_file`, `list_files`, `create_artifact`, `run_command`, and `ask_human`.
 
 - Safe file tools are contained to the workspace.
-- `run_command` is dangerous and approval-required.
-- In mock mode, command execution remains disabled unless explicitly allowed.
+- Tools are passed into `AgentContext`, so real agent steps can use them.
+- `create_artifact` uses the active artifact store and repository, not a disconnected store.
+- `run_command` is dangerous, approval-required, allowlisted, timed, output-capped, and uses a sanitized environment.
+- Command execution remains disabled unless explicitly allowed.
 - Approval-required tools create or require approval state instead of silently executing.
 - Every tool call appends a `tool.called` event.
+- Command results are written to `state/command-results.jsonl` and `final-package/trace/command-results.jsonl`.
 
 Approval commands operate on local state only. They do not send emails, deploy code, charge payments, or contact external services.
+
+## Review And Evals
+
+Final package validation is converted into a review result. A passing verdict completes the run. A failing verdict fails the run. A recoverable revise verdict emits a clear event when repair is disabled, which is the default. The experimental repair path can create a bounded fix task, but automated fix execution is intentionally not claimed yet.
+
+`pnpm eval:mock` runs deterministic mock evals across several software-freelance prompts and writes `outputs/evals/latest.json` and `outputs/evals/latest.md`.
 
 ## Provider Layer
 

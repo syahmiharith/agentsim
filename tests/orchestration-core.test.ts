@@ -26,6 +26,30 @@ describe("state machines", () => {
     expect(transitionRun(run, "planning").status).toBe("planning");
     expect(() => transitionRun({ ...run, status: "failed" }, "running")).toThrow("Invalid run transition");
   });
+
+  it("rejects invalid transitions through repositories", async () => {
+    const runRoot = await mkdtemp(join(tmpdir(), "agentsim-transition-repo-test-"));
+    const runsRepo = new LocalRunsRepo(runRoot);
+    const tasksRepo = new LocalTasksRepo(runRoot);
+    await runsRepo.createRun({ ...createRun(), status: "completed" });
+    await tasksRepo.createTask({ ...createTask("done", []), status: "completed" });
+
+    await expect(runsRepo.updateRunStatus("running")).rejects.toThrow("Invalid run transition");
+    await expect(tasksRepo.updateTaskStatus("done", "running")).rejects.toThrow("Invalid task transition");
+  });
+
+  it("allows retry and approval transitions through repositories", async () => {
+    const runRoot = await mkdtemp(join(tmpdir(), "agentsim-valid-transition-repo-test-"));
+    const runsRepo = new LocalRunsRepo(runRoot);
+    const tasksRepo = new LocalTasksRepo(runRoot);
+    await runsRepo.createRun({ ...createRun(), status: "waiting_for_approval" });
+    await tasksRepo.createTask({ ...createTask("approval", []), status: "waiting_for_approval" });
+    await tasksRepo.createTask({ ...createTask("retry", []), status: "failed" });
+
+    await expect(runsRepo.updateRunStatus("running")).resolves.toMatchObject({ status: "running" });
+    await expect(tasksRepo.updateTaskStatus("approval", "ready")).resolves.toMatchObject({ status: "ready" });
+    await expect(tasksRepo.updateTaskStatus("retry", "ready")).resolves.toMatchObject({ status: "ready" });
+  });
 });
 
 describe("scheduler", () => {
