@@ -1,46 +1,46 @@
 # Agentsim
 
-Agentsim is an open-source, artifact-first AI organization layer for solo software freelancers.
+Agentsim is an open-source tool for turning vague software requests into structured delivery packages.
 
-The idea is simple: one capable developer should be able to direct a small AI agency that plans, builds, reviews, and packages real client work.
+It is designed for solo software freelancers who need help with planning, building, reviewing, and handing off client work.
 
-Today, a freelancer can hand Agentsim a vague client request:
+A user can give Agentsim a rough client request:
 
 ```text
 Build an inventory request system for a flower company
 ```
 
-Agentsim turns that goal into a structured delivery package with planning docs, technical docs, a runnable app prototype, QA review, handoff notes, and trace files.
+Agentsim turns that request into a project package containing planning documents, technical notes, a runnable app prototype, QA review, handoff notes, and trace files.
 
-This is not another multi-agent chat toy. Agentsim is a control plane for durable work:
+Agentsim focuses on durable project artifacts rather than chat transcripts.
 
 ```text
-Goal -> Progress -> Decisions -> Artifacts -> Review -> Final package
+Goal -> Plan -> Decisions -> Artifacts -> Review -> Final package
 ```
 
-## Why This Should Exist
+## Problem
 
-Solo software freelancers already do the work of a small agency:
+Solo software freelancers often do the work of a small software team by themselves:
 
-- clarify vague client requests
-- define scope and risks
-- choose architecture
-- build prototypes
-- test and review delivery quality
-- write handoff notes
-- preserve decisions for later changes
+* clarifying vague client requests
+* defining scope and risks
+* choosing architecture
+* building prototypes
+* testing and reviewing delivery quality
+* writing handoff notes
+* preserving decisions for later changes
 
-Large teams have process, specialists, review loops, and delivery discipline. Solo developers usually have themselves, a chat window, and a pile of context they must keep in their head.
+Large teams have process, specialists, review loops, and delivery discipline. Solo developers usually have scattered notes, a chat window, and a lot of project context they must keep in their head.
 
-Agentsim is building the missing operating layer: one human director, one AI organization, real software delivery artifacts.
+Agentsim provides a structured workflow for turning client requests into reviewed, handoff-ready software artifacts.
 
-## The First Wedge
+## Current Focus
 
-The first narrow use case is freelance software delivery:
+The first use case is freelance software delivery:
 
 ```text
 vague client request
--> AI agency workflow
+-> AI-assisted workflow
 -> scoped plan
 -> reviewed runnable prototype
 -> handoff-ready package
@@ -77,48 +77,52 @@ outputs/{runId}/final-package/
     +-- artifact-lineage.json
 ```
 
-The v0 demo is intentionally small. It proves the spine before the platform grows.
+The v0 demo is intentionally small. It validates the core workflow before the project expands.
 
-## What Makes Agentsim Different
+## Design Principles
 
-Agentsim is not trying to create a new foundation model, a cloud IDE, or a generic agent marketplace.
+Agentsim is not trying to be a foundation model, a cloud IDE, or a generic agent marketplace.
 
-It is a BYOK control plane for AI work execution. It coordinates replaceable model providers, agents, workspaces, artifacts, reviews, approvals, event traces, and final delivery packages.
+The project is built around a few principles:
 
-The core bet:
+* Artifacts are more useful than chat transcripts.
+* Review loops are safer than one-shot generation.
+* Important decisions should be traceable.
+* Domain-specific workflows are more useful than generic agent swarms.
+* High-risk actions should require human approval.
+* Model providers should be replaceable.
 
-- Artifacts beat chat transcripts.
-- Review loops beat one-shot generation.
-- Traceable decisions beat hidden prompt state.
-- Domain workflows beat generic agent swarms.
-- Human approval should gate high-risk actions.
+The goal is to make AI-assisted software delivery easier to inspect, review, and continue over time.
 
-If you care about making AI useful for real client delivery, this is the layer to help build.
+## Current Capabilities
 
-## What Works Today
+Agentsim currently has a CLI-based proof of concept:
 
-Agentsim already has a CLI-shaped proof:
-
-- TypeScript CLI.
-- Local filesystem workspace.
-- Mock mode for deterministic no-key runs.
-- OpenAI-compatible live model provider mode.
-- Small agency roles: intake, PM, architect, builder, QA, delivery.
-- Durable artifact generation.
-- Artifact lineage, decision logs, approval records, and event traces.
-- Runnable generated app package for the first software-freelance workflow.
+* TypeScript CLI
+* local filesystem workspace
+* mock mode for deterministic no-key runs
+* OpenAI-compatible live model provider mode
+* AI-assisted roles for intake, planning, architecture, implementation, QA, and delivery
+* durable artifact generation
+* artifact lineage, decision logs, approval records, and event traces
+* runnable generated app package for the first software-freelance workflow
 
 ## Quickstart
 
-Requirements:
+### Requirements
 
-- Node.js 20.11+
-- pnpm
+* Node.js 20.11+
+* pnpm
 
-Install and run the demo:
+Install dependencies:
 
 ```bash
 pnpm install
+```
+
+Run the demo:
+
+```bash
 pnpm demo "Build an inventory request system for a flower company"
 ```
 
@@ -149,81 +153,64 @@ pnpm build
 
 Useful entry points:
 
-- `src/cli.ts` - CLI command surface.
-- `src/workflow.ts` - current end-to-end workflow.
-- `src/types.ts` - core contracts.
-- `src/agents/agents.ts` - agency role definitions.
-- `src/core/` - artifacts, events, hashing, redaction, workspace behavior.
-- `src/providers/` - model provider boundary.
-- `src/templates/` - generated delivery package templates.
-- `tests/` - workflow, CLI, hashing, and redaction coverage.
+* `src/cli.ts` - CLI command surface
+* `src/workflow.ts` - current end-to-end workflow
+* `src/types.ts` - core contracts
+* `src/agents/agents.ts` - AI-assisted role definitions
+* `src/core/` - artifacts, events, hashing, redaction, and workspace behavior
+* `src/providers/` - model provider boundary
+* `src/templates/` - generated delivery package templates
+* `tests/` - workflow, CLI, hashing, and redaction coverage
 
-## Core Contracts
+## Project Model
 
-Agentsim is being built around these concepts:
+Agentsim is currently built around these concepts:
 
-- `Agent`
-- `TaskRun`
-- `Artifact`
-- `Workspace`
-- `Decision`
-- `Approval`
-- `Event`
+* `Agent`
+* `TaskRun`
+* `Artifact`
+* `Workspace`
+* `Decision`
+* `Approval`
+* `Event`
 
-Upcoming platform contracts include:
+Planned contracts include:
 
-- `Organization`
-- `Project`
-- `DomainPack`
-- `WorkspaceDriver`
-- `ModelProvider`
-- `ArtifactStore`
-- `EventStore`
+* `Organization`
+* `Project`
+* `DomainPack`
+* `WorkspaceDriver`
+* `ModelProvider`
+* `ArtifactStore`
+* `EventStore`
 
-The current implementation is deliberately thin. The contracts are the product spine.
+The current implementation is deliberately thin. The priority is to make the software-delivery workflow useful before expanding the platform surface area.
 
-## Contribution Areas
+## Contributing
 
-The best contributions right now strengthen the vertical slice instead of widening the platform too early.
+The best contributions right now improve the current vertical slice instead of widening the platform too early.
 
-High-impact work:
+High-impact areas:
 
-- Make the CLI demo more reliable across different software project prompts.
-- Add artifact validation for final package completeness.
-- Improve the generated app quality without bloating the demo.
-- Strengthen QA review artifacts and known-issues reporting.
-- Add an eval harness that compares Agentsim workflow output against one-shot prompting.
-- Extend the local workspace driver with safe command execution.
-- Improve trace files so every run is easier to inspect and debug.
-- Add domain-pack boundaries only where they make the software-freelance workflow cleaner.
+* make the CLI demo more reliable across different software project prompts
+* add artifact validation for final package completeness
+* improve the generated app quality without bloating the demo
+* strengthen QA review artifacts and known-issues reporting
+* add an eval harness that compares Agentsim workflow output against one-shot prompting
+* extend the local workspace driver with safe command execution
+* improve trace files so every run is easier to inspect and debug
+* add domain-pack boundaries only where they make the software-freelance workflow cleaner
 
 Please avoid starting with:
 
-- full web dashboards
-- agent marketplaces
-- complex persistent memory
-- Docker-per-agent infrastructure
-- SaaS account systems
-- generic multi-agent chat UI
+* full web dashboards
+* agent marketplaces
+* complex persistent memory
+* Docker-per-agent infrastructure
+* SaaS account systems
+* generic multi-agent chat UI
 
 The project needs contributors who want to make one narrow workflow genuinely useful before making the system broad.
-
-## Roadmap
-
-The near-term path is:
-
-1. Harder CLI demo.
-2. Eval harness.
-3. Local workspace execution loop.
-4. Web artifact viewer.
-5. Project lifecycle memory.
-6. Solo agency operating dashboard.
-7. Domain pack API.
-8. Business operating layer.
-
-See [docs/milestones.md](docs/milestones.md) for the detailed roadmap.
-
-## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
@@ -234,6 +221,21 @@ git commit -s
 ```
 
 Good pull requests are small, testable, and aligned with the artifact-first product direction.
+
+## Roadmap
+
+The near-term path is:
+
+1. harder CLI demo
+2. eval harness
+3. local workspace execution loop
+4. web artifact viewer
+5. project lifecycle memory
+6. solo operator dashboard
+7. domain pack API
+8. business operating layer
+
+See [docs/milestones.md](docs/milestones.md) for the detailed roadmap.
 
 ## License
 
