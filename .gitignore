@@ -2,7 +2,12 @@ node_modules/
 dist/
 coverage/
 outputs/
+
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
 .env
 .env.*
 !.env.example
-
