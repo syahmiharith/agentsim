@@ -3,15 +3,23 @@ dist/
 coverage/
 outputs/
 
-# Local eval and benchmark runs can include private prompts, provider outputs,
-# timing data, and model comparisons. Keep them out of public commits.
-.agentsim-benchmarks/
-benchmark-results/
-comparison-results/
-eval-results/
-*.local-eval.json
-*.local-eval.jsonl
-*.local-eval.md
+# Private local planning
+docs/private/
+private/
+notes/private/
+*.private.md
+*.secret.md
+roadmap-private.md
+vision-private.md
+
+# Private Codex / agent instructions
+AGENTS.private.md
+AGENTS.local.md
+.codex/
+.agent-scratch/
+.agent-memory/
+prompts/private/
+system-prompts/private/
 
 *.log
 *.tsbuildinfo
@@ -21,3 +29,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+*.p12

@@ -19,7 +19,7 @@ List the main files, packages, templates, generated artifacts, or workflows touc
 - [ ] Model provider boundary
 - [ ] Review / QA
 - [ ] Documentation
-- [ ] Tests / evals
+- [ ] Tests
 - [ ] Chore
 
 ## Product fit

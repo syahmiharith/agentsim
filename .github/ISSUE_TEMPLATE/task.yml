@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This template is intended for maintainers. Contributors should usually use bug reports, feature requests, documentation improvements, workflow improvements, or eval cases.
+        This template is intended for maintainers. Contributors should usually use bug reports, feature requests, documentation improvements, or workflow improvements.
   - type: textarea
     id: goal
     attributes:

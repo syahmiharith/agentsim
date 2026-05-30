@@ -1,18 +1,27 @@
 # AGENTS.md
 
-## Project: Agentsim
+## Project Boundary
 
-Agentsim is an open-source AI organization layer for solo software freelancers.
+Agentsim is an open-source, artifact-first CLI workflow for solo software freelancers.
 
-The goal is to help one capable person operate with the execution capacity, specialist coverage, and coordination discipline of a small software agency.
+Current public promise:
 
-The first narrow use case is:
+```text
+vague client software request
+-> scoped plan
+-> reviewed runnable prototype
+-> handoff-ready final package
+```
 
-> A solo freelance software developer gives a vague client software request to an AI team and receives a scoped, reviewed, runnable, handoff-ready software delivery package.
+Agentsim is a BYOK control plane. It coordinates model providers, agents, workspaces, artifacts, reviews, approvals, event traces, and final packages. It does not own foundation models, cloud infrastructure, deployment platforms, vector databases, or container runtimes.
 
-Agentsim is **not** trying to create a new foundation model. It is a **BYOK control plane** that coordinates model providers, agents, workspaces, artifacts, reviews, approvals, and final delivery packages.
+The user-facing abstraction should stay outcome-driven:
 
----
+```text
+Goal -> Progress -> Decisions -> Artifacts -> Review -> Final package
+```
+
+Do not turn the product into generic multi-agent chat.
 
 ## Documentation Reference Rule
 
@@ -23,204 +32,85 @@ Use these references in order:
 ```text
 README.md
 docs/milestones.md
-examples/software-freelance/evals/cases.md
+docs/architecture.md
 CONTRIBUTING.md
 SECURITY.md
 tests/
 ```
 
-Treat `docs/milestones.md` as the current development roadmap. Treat `README.md` as the user-facing project promise. Treat eval cases and tests as executable expectations for the current vertical slice.
+Treat `README.md` as the public promise. Treat `docs/milestones.md` as the current public roadmap. Treat tests as executable expectations for the current vertical slice.
 
 If documentation and code disagree, prefer the code for current behavior, then update the smallest relevant documentation or implementation surface so future work has one clear source of truth.
 
----
+Private strategy, private prompts, local evidence, and local Codex plans belong in ignored paths such as `docs/private/`, `private/`, or `prompts/private/`. Do not commit them.
 
-## Core Product Vision
+## Current Milestone
 
-Long-term vision:
-
-> One human director. One AI organization. Real business execution.
-
-First wedge:
-
-> One solo software freelancer can turn a vague client request into a professional software delivery package with the support of a structured AI team.
-
-The user should feel like they are directing a small software agency, not operating an agent framework.
-
-The product experience should be:
-
-```text
-Goal
-→ Progress
-→ Decisions needed
-→ Artifacts
-→ Review
-→ Final package
-```
-
-The internal system may use agents, tasks, model calls, workspaces, and reviewers, but the user-facing abstraction should remain outcome-driven.
-
----
-
-## What Agentsim Is
-
-Agentsim is mostly a **control plane**.
-
-It owns:
-
-```text
-goals
-agents
-task assignment
-artifact flow
-approvals
-decisions
-event trace
-workspace abstraction
-memory
-lineage
-final package assembly
-```
-
-It does not own:
-
-```text
-foundation models
-container runtimes
-cloud infrastructure
-vector databases
-deployment platforms
-```
-
-Those should remain replaceable dependencies behind thin interfaces.
-
-Use abstractions such as:
-
-```ts
-ModelProvider
-WorkspaceDriver
-ToolExecutor
-ArtifactStore
-EventStore
-```
-
----
-
-## v0 Target
-
-The first milestone is a CLI demo.
-
-Example:
+The current public focus is still the CLI vertical slice:
 
 ```bash
-pnpm demo "Build an inventory request system for a flower company"
+pnpm agentsim run "Build an inventory request system for a flower company" --mock
 ```
 
-Expected output:
+`pnpm demo` is a local shortcut for the same run command:
+
+```bash
+pnpm demo "Build an inventory request system for a flower company" --mock
+```
+
+The final package should include client, planning, technical, app, review, and trace artifacts. The generated app should be simple but runnable locally.
+
+Prioritize improvements that strengthen:
+
+1. core contracts
+2. CLI run workflow
+3. local filesystem workspace
+4. artifact generation and validation
+5. event trace, decisions, approvals, and lineage
+6. review and QA artifacts
+7. final package assembly
+8. runnable app output
+
+## Commands
+
+Use the package scripts that exist in `package.json`:
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm demo "Build an inventory request system for a flower company" --mock
+pnpm agentsim run "Build an inventory request system for a flower company" --mock
+pnpm agentsim dashboard <runId>
+pnpm agentsim tui <runId>
+```
+
+Maintainer-local checks are private evidence. Do not publish, document, or commit their outputs until the maintainer intentionally chooses what to share.
+
+## Code Structure
+
+Important entry points:
 
 ```text
-outputs/{runId}/final-package/
-├── client/
-│   ├── project-summary.md
-│   ├── handoff-notes.md
-│   └── user-guide.md
-├── planning/
-│   ├── requirements.md
-│   ├── scope.md
-│   ├── assumptions.md
-│   ├── timeline.md
-│   └── risks.md
-├── technical/
-│   ├── architecture.md
-│   ├── task-breakdown.md
-│   └── deployment-guide.md
-├── app/
-│   ├── package.json
-│   ├── src/
-│   └── README.md
-├── review/
-│   ├── qa-report.md
-│   ├── code-review.md
-│   └── known-issues.md
-└── trace/
-    ├── events.jsonl
-    ├── decisions.json
-    └── artifact-lineage.json
+src/cli.ts                         CLI command surface
+src/workflow.ts                    current end-to-end workflow
+src/types.ts                       public core contracts
+src/agents/agents.ts               current role definitions
+src/core/artifacts.ts              artifact store and lineage export
+src/core/events.ts                 JSONL event store and redaction
+src/core/final-package-validation.ts
+src/core/workspace.ts              local filesystem workspace driver
+src/domain/                        software-freelance domain pack and inference
+src/providers/                     mock and OpenAI-compatible providers
+src/templates/                     Markdown and generated app templates
+tests/                             executable expectations
 ```
 
-The generated app should be simple but runnable locally.
-
-For the first demo, acceptable app scope:
-
-```text
-create inventory request
-view request list
-update request status
-basic admin page
-mock database or SQLite
-README with run instructions
-```
-
-The demo must prove:
-
-```text
-high-level client goal
-→ AI agency workflow
-→ artifact generation
-→ runnable software prototype
-→ QA review
-→ final handoff package
-```
-
----
-
-## Recommended Stack
-
-Use TypeScript as the main implementation language.
-
-Preferred v0 stack:
-
-```text
-TypeScript
-pnpm
-Node.js
-Commander.js
-Zod
-tsx
-dotenv
-execa
-fs/promises
-```
-
-Use Python only for optional eval/data/helper scripts later.
-
-Use Go only later if a stable runner, daemon, or standalone binary becomes necessary.
-
----
-
-## Suggested Repository Structure
-
-Start with this shape:
-
-```text
-/apps/cli
-/packages/core
-/packages/artifacts
-/packages/agents
-/packages/workspaces
-/packages/model-providers
-/packages/evals
-/examples/software-freelance
-/outputs
-```
-
-Do not add a full web app until the CLI vertical slice works.
-
----
+The current package layout is intentionally simple. Do not introduce a monorepo package split unless the existing CLI workflow needs it.
 
 ## Core Contracts
 
-Build around these contracts from day one:
+Keep implementation aligned with these contracts:
 
 ```text
 Agent
@@ -233,21 +123,19 @@ Event
 Organization
 Project
 DomainPack
+ModelProvider
+WorkspaceDriver
+ArtifactStore
+EventStore
 ```
 
-These are the spine of the product.
-
-The implementation can be thin in v0, but the contracts should be clean.
-
----
+Use thin interfaces for replaceable dependencies. Keep `LocalFilesystemWorkspaceDriver` as the v0 default. Add more infrastructure only when it is needed for the current workflow.
 
 ## Artifact-First Rule
 
-Agentsim is artifact-first.
+Agents coordinate through artifacts, not free-form chat.
 
-Agents should coordinate through artifacts, not free-form chat.
-
-Good coordination primitive:
+Good coordination primitives:
 
 ```text
 Artifact produced
@@ -257,221 +145,13 @@ Artifact approved
 Artifact exported
 ```
 
-Avoid making agent-to-agent chat the core system.
+Each artifact should preserve owner, status, review status, approval status, content hash, final package path, and lineage.
 
-Each artifact should track:
+Do not add more agents unless the current workflow produces better artifacts because of it.
 
-```text
-id
-runId
-projectId
-type
-title
-status
-ownerAgentId
-inputArtifactIds
-contentPath
-contentHash
-createdAt
-updatedAt
-reviewStatus
-approvalStatus
-```
+## Security Rules
 
-Example artifact statuses:
-
-```text
-draft
-reviewed
-approved
-rejected
-superseded
-```
-
----
-
-## Agent Model
-
-For the first software-freelance workflow, use a small AI agency team:
-
-```text
-Client Intake Agent
-Scope / PM Agent
-Software Architect Agent
-Builder Agent
-Reviewer / QA Agent
-Delivery Agent
-```
-
-Responsibilities:
-
-### Client Intake Agent
-
-Turns vague client goals into:
-
-```text
-client brief
-clarifying questions
-assumptions
-initial project interpretation
-```
-
-### Scope / PM Agent
-
-Produces:
-
-```text
-requirements
-scope
-timeline
-milestones
-risks
-task breakdown
-```
-
-### Software Architect Agent
-
-Produces:
-
-```text
-architecture
-database plan
-API plan
-technical constraints
-implementation approach
-```
-
-### Builder Agent
-
-Produces or modifies:
-
-```text
-app files
-README
-.env.example
-setup instructions
-```
-
-### Reviewer / QA Agent
-
-Checks:
-
-```text
-requirements consistency
-scope realism
-code quality
-runnability
-known issues
-missing edge cases
-```
-
-### Delivery Agent
-
-Packages:
-
-```text
-client summary
-handoff notes
-final package
-trace files
-```
-
----
-
-## TaskRun State Machine
-
-Use deterministic task states before adding complex orchestration.
-
-Suggested states:
-
-```text
-PENDING
-RUNNING
-PRODUCED_ARTIFACT
-NEEDS_REVIEW
-REVIEW_PASSED
-REVIEW_FAILED
-WAITING_HUMAN_APPROVAL
-APPROVED
-REJECTED
-COMPLETED
-FAILED
-CANCELLED
-```
-
-Failure states should preserve traceability:
-
-```text
-FAILED_MODEL_CALL
-FAILED_TOOL_CALL
-FAILED_REVIEW
-TIMEOUT
-BUDGET_EXCEEDED
-```
-
----
-
-## Workspace Strategy
-
-Do not start with complex Docker infrastructure.
-
-Start with a workspace abstraction:
-
-```text
-WorkspaceDriver
-├── LocalFilesystemWorkspaceDriver
-└── DockerWorkspaceDriver later
-```
-
-v0 should use:
-
-```text
-LocalFilesystemWorkspaceDriver
-```
-
-The interface should allow later support for:
-
-```text
-DockerWorkspaceDriver
-E2BWorkspaceDriver
-DaytonaWorkspaceDriver
-RemoteVMWorkspaceDriver
-```
-
-The interface should support:
-
-```ts
-createWorkspace(runId)
-writeFile(workspaceId, path, content)
-readFile(workspaceId, path)
-listFiles(workspaceId)
-runCommand(workspaceId, command)
-```
-
-`runCommand` can be optional in the first implementation but should be included in the interface design.
-
----
-
-## BYOK Model Provider Rule
-
-Agentsim uses Bring Your Own Key.
-
-Start simple:
-
-```text
-.env-based API keys for local development
-```
-
-Later:
-
-```text
-encrypted credential storage
-provider-level routing
-per-run model selection
-cost tracking
-```
-
-Never leak API keys into:
+Agentsim uses Bring Your Own Key. Never leak API keys, credentials, private prompts, client data, or secrets into:
 
 ```text
 logs
@@ -480,230 +160,42 @@ artifacts
 workspace files
 model-visible prompts
 error traces
+private reports
+public docs
 ```
 
-Start with a simple provider interface:
+Use `.env` only for local development. Keep `.env.example` public-safe. Generated outputs and private planning files must stay ignored.
 
-```ts
-interface ModelProvider {
-  generate(input: GenerateInput): Promise<GenerateResult>
-}
-```
+## What Not To Build Now
 
-Start with one provider first. Add more only after the vertical slice works.
-
----
-
-## Event Trace
-
-Every run should produce an event log.
-
-For v0:
+Do not start with:
 
 ```text
-outputs/{runId}/final-package/trace/events.jsonl
-```
-
-Each event should include:
-
-```text
-timestamp
-runId
-taskRunId
-agentId
-eventType
-message
-artifactId?
-metadata?
-```
-
-The event trace is important because the product’s differentiation depends on:
-
-```text
-traceability
-artifact lineage
-reviewability
-debuggability
-```
-
----
-
-## Evaluation Harness
-
-Evaluation is not optional.
-
-Create an eval harness early.
-
-Suggested folder:
-
-```text
-/packages/evals
-/examples/software-freelance/evals
-```
-
-Eval cases should include:
-
-```text
-inventory request system
-booking system
-student portal
-expense splitter
-small CRM
-landing page for local business
-```
-
-Score outputs on:
-
-```text
-requirement completeness
-scope realism
-artifact consistency
-runnability
-QA quality
-handoff usefulness
-cost per run
-human decisions required
-```
-
-The product must eventually prove that this workflow is better than a single ChatGPT/Claude prompt.
-
----
-
-## Human Approval Principle
-
-The AI team can draft, analyze, recommend, generate, and package.
-
-The AI team should require human approval before high-risk actions such as:
-
-```text
-sending emails
-publishing websites
-deploying to production
-charging money
-ordering services
-deleting data
-changing pricing
-contacting clients
-```
-
-For v0, approvals can be stored as records even if the CLI uses simple prompts.
-
----
-
-## What To Avoid In v0
-
-Do not build these first:
-
-```text
-full web dashboard
-visual workflow builder
+SaaS accounts
 agent marketplace
-complex persistent memory
-multi-agent chat UI
+visual workflow builder
+generic multi-agent chat UI
 Docker-per-agent runtime
-SaaS BYOK
-broad business management
-generic Manus clone
+remote VM runtime
+autonomous deploys
+automatic client emails
+payment charging
+production delivery claims
 ```
 
-Do not overbuild the platform before the first useful output works.
+If a proposed change does not strengthen the current `goal -> reviewed final package` loop, defer it or document why it is necessary now.
 
-The first product must be useful even before it is complex.
+## Definition of Done
 
----
+For code changes:
 
-## Differentiation
+- relevant tests are added or updated
+- `pnpm typecheck`, `pnpm test`, and `pnpm build` pass
+- generated outputs remain ignored
+- docs are updated when public behavior changes
 
-Agentsim is not mainly:
+For documentation changes:
 
-```text
-multi-agent chat
-```
-
-It is:
-
-```text
-artifact-first AI work execution for solo software freelancers
-```
-
-The differentiator is:
-
-```text
-durable artifacts
-artifact lineage
-human approvals
-review loops
-decision logs
-workspace outputs
-final delivery packages
-organizational memory over time
-```
-
-The first proof is narrow:
-
-> Can one solo developer use Agentsim to handle freelance software work with the discipline and output quality of a small agency?
-
-Build toward that.
-
----
-
-## Development Priorities
-
-Prioritize in this order:
-
-```text
-1. Core contracts
-2. CLI run command
-3. Local filesystem workspace
-4. Artifact generation
-5. Event trace
-6. Review step
-7. Final package assembly
-8. Runnable app output
-9. Eval harness
-10. Web artifact viewer later
-```
-
-Do not add more agents unless the existing workflow produces better artifacts.
-
-Do not add more infrastructure unless the current workflow needs it.
-
-Do not add broad domain support until the software-freelance workflow is useful.
-
----
-
-## Quality Bar
-
-A successful v0 run should satisfy:
-
-```text
-The user gives one high-level client goal.
-The system produces multiple durable artifacts.
-The artifacts are internally consistent.
-The generated app can run locally.
-The reviewer identifies weaknesses or confirms readiness.
-The final package is organized enough to hand off.
-The event trace explains what happened.
-```
-
-This is the minimum product proof.
-
----
-
-## North Star
-
-Agentsim should grow through this sequence:
-
-```text
-1. Generate reviewed software delivery packages
-2. Generate runnable software packages
-3. Manage project lifecycle
-4. Manage freelance agency operations
-5. Add domain packs
-6. Support recurring business workflows
-7. Become an AI organization runtime
-```
-
-Always preserve the main thesis:
-
-> One capable human should be able to direct an AI team that plans, builds, reviews, remembers, and operates business workflows.
+- commands match `package.json`
+- public docs do not expose private strategy, private prompts, or private evidence
+- `README.md`, `docs/milestones.md`, `docs/architecture.md`, and `CONTRIBUTING.md` stay consistent

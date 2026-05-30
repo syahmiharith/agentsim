@@ -10,7 +10,6 @@
   "scripts": {
     "agentsim": "tsx src/cli.ts",
     "demo": "tsx src/cli.ts run",
-    "eval": "tsx src/evals/run-evals.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

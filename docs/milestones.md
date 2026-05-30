@@ -1,29 +1,31 @@
 # Agentsim Milestones
 
-## North Star
+## Public Roadmap Boundary
 
-One capable person can direct an AI organization that plans, builds, reviews, remembers, and operates business workflows.
+This public roadmap covers the near-term open-source product path: make the software-freelance CLI workflow reliable, reviewable, runnable, and understandable.
 
-The first proof stays narrow:
+Private long-term strategy, competitive positioning, private prompts, and deeper product expansion plans should stay in ignored local docs such as `docs/private/`.
+
+## North Star For Public Work
+
+One solo software freelancer can turn a vague client software request into a scoped, reviewed, runnable, handoff-ready software delivery package.
+
+The current workflow should stay centered on:
 
 ```text
-solo freelance software developer
--> AI agency team
--> scoped, reviewed, runnable, handoff-ready software package
+Goal -> Progress -> Decisions -> Artifacts -> Review -> Final package
 ```
 
-Complexity should increase through artifacts, memory, decisions, workflows, and execution rights, not by adding more agents first.
+Complexity should increase only when it improves artifact quality, traceability, review, runnability, or handoff usefulness.
 
 ## How To Use This Roadmap
-
-This document is the development roadmap for Agentsim. When product direction is unclear, use it with `AGENTS.md` and `README.md` before expanding scope.
 
 Decision order:
 
 1. Preserve the current CLI vertical slice.
 2. Improve artifact quality, traceability, review, and runnable output.
 3. Keep infrastructure replaceable behind thin contracts.
-4. Delay dashboards, marketplaces, SaaS features, and broad domain support until the software-freelance workflow is clearly useful.
+4. Delay broad platform work until the software-freelance workflow is clearly useful.
 
 If a proposed change does not strengthen the current `goal -> reviewed final package` loop, defer it or write down why it is necessary now.
 
@@ -32,78 +34,57 @@ If a proposed change does not strengthen the current `goal -> reviewed final pac
 Agentsim already has the first CLI-shaped proof:
 
 ```bash
-pnpm demo "Build an inventory request system for a flower company"
+pnpm agentsim run "Build an inventory request system for a flower company" --mock
 ```
+
+`pnpm demo` remains a shortcut for local demos.
 
 Current capabilities:
 
 - TypeScript CLI and local filesystem workspace.
-- Core contracts for `Agent`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, and `Event`.
+- Core contracts for `Agent`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
 - Mock and OpenAI-compatible model provider boundary.
 - Artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
-- Deterministic eval harness with software-freelance cases, scorecards, one-shot baselines, an aggregate report, and a development-justification report.
+- Final package validation and `run-summary.json`.
 
-The next work should strengthen organizational capability around this spine.
+The next work should strengthen this spine rather than broaden the product.
 
 ## Milestone 1: Harder CLI Demo
 
-Goal: prove `goal -> package` reliably across more than one example.
+Goal: prove `goal -> package` reliably across more than one client-style software request.
 
 Build:
 
-- Add `agentsim run` as the canonical command while keeping `pnpm demo` as a local shortcut.
-- Add `Organization`, `Project`, and `DomainPack` as thin core contracts.
-- Move the software freelance workflow into a first `software-freelance-pack` config.
-- Add required artifact validation for final-package completeness.
-- Add a `run-summary.json` with run status, package path, artifact count, and failures.
+- Keep `agentsim run` as the canonical command while preserving `pnpm demo` as a local shortcut.
+- Keep `Organization`, `Project`, and `DomainPack` as thin core contracts.
+- Keep the software-freelance workflow represented by `software-freelance-pack`.
+- Strengthen required artifact validation for final-package completeness.
+- Keep `run-summary.json` accurate with run status, package path, artifact count, validation result, and failures.
 
 Acceptance:
 
 - One command creates a complete delivery package.
-- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, events, decisions, approvals, and lineage.
+- Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, events, decisions, approvals, lineage, and run summary.
 - The code still defaults to local filesystem and mock mode without keys.
 
 Do not build:
 
-- Dashboard.
+- SaaS accounts.
 - Docker runtime.
 - Multi-agent chat.
-- SaaS accounts.
+- Agent marketplace.
 
-## Milestone 2: Eval Harness
-
-Goal: prove the workflow is better than one-shot prompting.
-
-Build:
-
-- Add eval cases for inventory system, booking system, student portal, expense splitter, and small CRM.
-- Add a deterministic mock eval mode and optional live model eval mode.
-- Score package outputs with a rubric: completeness, runnable app, client clarity, technical clarity, QA quality, and traceability.
-- Compare Agentsim workflow output against a single-prompt baseline.
-
-Acceptance:
-
-- `pnpm eval` runs all cases and writes an eval report.
-- Each case creates an output package and a scorecard.
-- The report shows where workflow structure beats or loses to one-shot prompting.
-
-Do not build:
-
-- Complex benchmark platform.
-- Public leaderboard.
-- Model marketplace.
-
-## Milestone 3: Local Workspace Execution Loop
+## Milestone 2: Local Workspace Execution Loop
 
 Goal: prove tangible execution, not just file generation.
 
 Build:
 
-- Extend `WorkspaceDriver` with a command runner.
+- Extend `WorkspaceDriver` with a safe command runner.
 - Run generated app install/build checks automatically where safe.
 - Capture command results into `trace/command-results.jsonl`.
-- Add an error repair loop for common generated-app failures.
+- Add a small repair loop for common generated-app failures.
 - Add `test-report.md` to the app package.
 
 Acceptance:
@@ -118,22 +99,22 @@ Do not build:
 - Remote VM execution.
 - Autonomous deploys.
 
-## Milestone 4: Web Artifact Viewer
+## Milestone 3: Web Artifact Viewer
 
-Goal: make the product understandable to a human director.
+Goal: make completed runs understandable to a human director without requiring manual filesystem inspection.
 
 Build:
 
 - A local web viewer for completed runs.
-- Views for Goal, Progress, Artifacts, Decisions, Events, QA, and Final Package.
-- Artifact preview for Markdown and app file tree.
+- Views for Goal, Progress, Decisions, Artifacts, Review, Trace, and Final Package.
+- Markdown artifact preview and app file tree.
 - Decision and approval status surfaces.
 
 Acceptance:
 
 - A user can inspect a run without opening the filesystem manually.
 - The UI follows the product flow: Goal -> Progress -> Decisions -> Artifacts -> Review -> Final Package.
-- The UI does not expose agent-chat as the core experience.
+- The UI does not expose agent chat as the core experience.
 
 Do not build:
 
@@ -141,96 +122,10 @@ Do not build:
 - Visual workflow builder.
 - Team permissions.
 
-## Milestone 5: Project Lifecycle Memory
-
-Goal: move from one-shot package generation to project continuation.
-
-Build:
-
-- Persist projects separately from task runs.
-- Add commands for continuing a project, revising scope, handling a change request, and generating handoff v2.
-- Store client preferences, approved scope, rejected features, stack decisions, known issues, and prior artifacts.
-- Add superseded artifact status and change-request history.
-
-Acceptance:
-
-- A user can run a second command against an existing project.
-- The new run references previous decisions and artifacts.
-- Change requests produce updated scope, impact notes, revised tasks, and delivery notes.
-
-Do not build:
-
-- Vector memory first.
-- Broad CRM.
-- Email sending.
-
-## Milestone 6: Solo Agency Operating Dashboard
-
-Goal: move from project tool to solo agency operating system.
-
-Build:
-
-- Clients, projects, proposal status, delivery status, pending decisions, and weekly report.
-- Lead qualification and proposal pipeline as artifacts first.
-- Client communication drafts without automatic sending.
-- Invoice reminder artifacts without payment automation.
-
-Acceptance:
-
-- A weekly agency review summarizes active projects, delayed work, client follow-ups, unpaid invoices, risks, and recommended next actions.
-- The dashboard emphasizes decisions needed and delivery risks.
-- High-risk actions require approval gates.
-
-Do not build:
-
-- Payment charging.
-- Automatic client email.
-- Accounting system.
-- Generic business OS outside software freelancing.
-
-## Milestone 7: Domain Pack API
-
-Goal: make Agentsim open-source extensible without losing domain quality.
-
-Build:
-
-- Formal `DomainPack` interface for agents, workflow steps, artifact types, rubrics, risk checklists, approval rules, final package templates, and tools.
-- Keep `software-freelance-pack` as the reference implementation.
-- Add one small experimental second pack only after the software pack is strong.
-
-Acceptance:
-
-- Contributors can add a domain pack without editing the core orchestrator.
-- Packs define behavior through artifacts, workflows, rubrics, and approval policies.
-- Domain-aware behavior is stronger than generic agents.
-
-Do not build:
-
-- Marketplace.
-- Unreviewed pack execution.
-- Broad generic pack that weakens the product identity.
-
-## Milestone 8: Business Operating Layer
-
-Goal: support recurring business workflows with controlled execution rights.
-
-Build:
-
-- Recurring review workflows.
-- Business memory for projects, clients, decisions, risks, and recurring obligations.
-- Approval policy tiers for low-risk automatic tasks and high-risk human decisions.
-- Optional integrations only behind explicit approval.
-
-Acceptance:
-
-- The system can run a weekly business review for a solo software agency.
-- It can recommend next actions from durable memory and current project state.
-- It does not autonomously send messages, charge money, publish sites, order services, delete files, or change pricing.
-
 ## Execution Rules
 
 - Useful output first, complexity second.
 - Add interfaces early, keep implementations simple.
-- Upgrade through artifact complexity, execution capability, persistence, decision rights, and domain awareness.
-- Keep the user experience centered on: give goal, review plan, approve decisions, inspect artifacts, receive final package, continue project.
+- Prefer artifact complexity, execution capability, persistence, and review quality over more agents.
+- Keep the user experience centered on giving a goal, reviewing artifacts, inspecting traceability, and receiving a final package.
 - Avoid turning Agentsim into generic multi-agent chat software.

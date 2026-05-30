@@ -32,13 +32,12 @@ Current capability:
 * generate planning, technical, review, client handoff, trace, and app prototype files
 * run in deterministic mock mode without provider keys
 * use an OpenAI-compatible provider in live mode when configured
-* run a deterministic eval harness across the first software-freelance cases
 
 Current limitations:
 
 * generated apps are simple prototypes and still need human review before client delivery
 * the workflow is tuned for the first software-freelance demo, not arbitrary domains
-* approvals, eval scoring, workspace execution, and provider routing are still early
+* approvals, workspace execution, and provider routing are still early
 * no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
@@ -116,7 +115,7 @@ Agentsim is not trying to be a foundation model, a cloud IDE, or a generic agent
 The project is built around a few principles:
 
 * Artifacts are more useful than chat transcripts.
-* Review loops are safer than one-shot generation.
+* Review loops are safer than unchecked generation.
 * Important decisions should be traceable.
 * Domain-specific workflows are more useful than generic agent swarms.
 * High-risk actions should require human approval.
@@ -173,23 +172,12 @@ pnpm demo "Build an inventory request system for a flower company" --live
 
 If no live key is configured and `--live` is not passed, Agentsim falls back to mock mode.
 
-Run the software-freelance eval harness:
-
-```bash
-pnpm eval
-```
-
-This writes per-case final packages, scorecards, one-shot baselines, an aggregate report, and `development-justification.md` under `outputs/evals/{evalRunId}`.
-
-Eval and benchmark outputs are intentionally gitignored. They may contain private prompts, provider outputs, timing data, and model-comparison notes. Treat them as local evidence until Agentsim can match or beat strong one-shot model baselines on throughput and exceed them on reviewed delivery-package quality.
-
 ## Development
 
 ```bash
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm eval
 ```
 
 Useful entry points:
@@ -244,7 +232,6 @@ High-impact areas:
 * add artifact validation for final package completeness
 * improve the generated app quality without bloating the demo
 * strengthen QA review artifacts and known-issues reporting
-* add an eval harness that compares Agentsim workflow output against one-shot prompting
 * extend the local workspace driver with safe command execution
 * improve trace files so every run is easier to inspect and debug
 * add domain-pack boundaries only where they make the software-freelance workflow cleaner
@@ -272,16 +259,11 @@ Good pull requests are small, testable, and aligned with the artifact-first prod
 
 ## Roadmap
 
-The near-term path is:
+The public near-term path is:
 
 1. harder CLI demo
-2. eval harness
-3. local workspace execution loop
-4. web artifact viewer
-5. project lifecycle memory
-6. solo operator dashboard
-7. domain pack API
-8. business operating layer
+2. local workspace execution loop
+3. web artifact viewer
 
 See [docs/milestones.md](docs/milestones.md) for the detailed roadmap.
 
