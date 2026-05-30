@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a capability that improves the v0 software-freelance workflow.
+title: "feature: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve for a solo software freelancer?
+      placeholder: Solo developers need a clearer way to inspect which assumptions shaped the generated scope.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful version.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Core contracts
+        - CLI run command
+        - Local filesystem workspace
+        - Artifact generation
+        - Event trace
+        - Review / QA
+        - Final package assembly
+        - Runnable app output
+        - Eval harness
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: artifact-impact
+    attributes:
+      label: Artifact-first impact
+      description: What durable artifact, review loop, decision record, approval, or trace output improves?
+    validations:
+      required: true
+  - type: checkboxes
+    id: guardrails
+    attributes:
+      label: v0 guardrails
+      options:
+        - label: This does not require a full web dashboard.
+          required: true
+        - label: This does not require Docker-per-agent infrastructure.
+          required: true
+        - label: This improves the software-freelance vertical slice before broadening the platform.
+          required: true

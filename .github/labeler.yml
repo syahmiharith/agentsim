@@ -1,0 +1,45 @@
+core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/types.ts"
+          - "src/core/**"
+
+cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/cli.ts"
+          - "src/tui/**"
+
+agents:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/agents/**"
+
+providers:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/providers/**"
+
+templates:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/templates/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "vitest.config.ts"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "docs/**"
+          - "AGENTS.md"
+
+github:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"

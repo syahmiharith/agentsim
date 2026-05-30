@@ -1,0 +1,73 @@
+name: Bug report
+description: Report incorrect behavior in the CLI, workflow, generated package, or trace output.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail for a maintainer to reproduce it locally.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: The demo run completed, but the final package was missing review/qa-report.md.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the exact commands and inputs used.
+      placeholder: |
+        1. pnpm install
+        2. pnpm demo "Build an inventory request system for a flower company" --mock
+        3. Inspect outputs/<runId>/final-package/
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "20.11.0"
+    validations:
+      required: true
+  - type: input
+    id: pnpm
+    attributes:
+      label: pnpm version
+      placeholder: "9.0.0"
+    validations:
+      required: false
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Paste logs or error output. Remove API keys, secrets, and client-sensitive data.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submit checks
+      options:
+        - label: I removed API keys, tokens, credentials, and client-sensitive data from this report.
+          required: true
+        - label: I searched existing issues for a duplicate.
+          required: true

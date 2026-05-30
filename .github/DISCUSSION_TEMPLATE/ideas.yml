@@ -1,0 +1,23 @@
+title: "[Idea]: "
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What should Agentsim explore?
+    validations:
+      required: true
+  - type: textarea
+    id: user-value
+    attributes:
+      label: User value
+      description: How does this help a solo software freelancer deliver better work?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: What should stay out of scope for v0?
+    validations:
+      required: false

@@ -1,0 +1,59 @@
+name: Demo Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.json"
+      - ".github/workflows/demo-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-demo:
+    name: Mock demo produces a final package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.11"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run mock demo
+        run: pnpm demo "Build an inventory request system for a flower company" --mock
+
+      - name: Verify final package shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_run="$(find outputs -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          test -n "$latest_run"
+          test -f "$latest_run/final-package/client/project-summary.md"
+          test -f "$latest_run/final-package/planning/requirements.md"
+          test -f "$latest_run/final-package/technical/architecture.md"
+          test -f "$latest_run/final-package/app/package.json"
+          test -f "$latest_run/final-package/review/qa-report.md"
+          test -f "$latest_run/final-package/trace/events.jsonl"
+          test -f "$latest_run/final-package/trace/decisions.json"
+          test -f "$latest_run/final-package/trace/artifact-lineage.json"

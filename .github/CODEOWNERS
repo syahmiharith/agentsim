@@ -1,0 +1,9 @@
+# Default ownership for all project files.
+* @syahmiharith
+
+# Core runtime and contracts.
+/src/ @syahmiharith
+/tests/ @syahmiharith
+
+# Repository automation and community health files.
+/.github/ @syahmiharith

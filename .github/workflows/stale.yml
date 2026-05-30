@@ -1,0 +1,28 @@
+name: Stale Issues
+
+on:
+  schedule:
+    - cron: "15 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark stale issues and PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+          exempt-issue-labels: "security,roadmap,good first issue"
+          exempt-pr-labels: "security,dependencies"
+          days-before-stale: 60
+          days-before-close: 14
+          stale-issue-message: "This issue has been inactive for 60 days. Please add current context if it is still relevant to the v0 software-freelance workflow."
+          stale-pr-message: "This pull request has been inactive for 60 days. Please rebase and confirm whether it is still ready for review."
+          close-issue-message: "Closing as stale. Reopen with current reproduction steps, acceptance criteria, or product context if this is still relevant."
+          close-pr-message: "Closing as stale. Reopen or create a new pull request when the change is ready to continue."

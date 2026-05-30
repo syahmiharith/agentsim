@@ -1,0 +1,32 @@
+name: Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+      prerelease:
+        description: "Mark this release as a prerelease"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          draft: true
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true

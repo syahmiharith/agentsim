@@ -1,0 +1,33 @@
+name: Documentation improvement
+description: Improve README, contributing docs, generated handoff docs, or architecture notes.
+title: "docs: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: dropdown
+    id: docs-area
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - CONTRIBUTING
+        - Generated client package
+        - Generated technical package
+        - CLI usage
+        - Architecture / contracts
+        - Eval documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is confusing, missing, or outdated?
+    validations:
+      required: true
+  - type: textarea
+    id: suggested-change
+    attributes:
+      label: Suggested change
+      description: Include proposed wording or structure if you have it.
+    validations:
+      required: false

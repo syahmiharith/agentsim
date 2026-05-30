@@ -1,0 +1,26 @@
+name: Maintainer task
+description: Track internal cleanup, chores, or scoped implementation work.
+title: "task: "
+labels: ["task", "needs-triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What needs to be done?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included and excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: List concrete completion criteria.
+    validations:
+      required: true
