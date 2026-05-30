@@ -179,7 +179,9 @@ Run the software-freelance eval harness:
 pnpm eval
 ```
 
-This writes per-case final packages, scorecards, one-shot baselines, and an aggregate report under `outputs/evals/{evalRunId}`.
+This writes per-case final packages, scorecards, one-shot baselines, an aggregate report, and `development-justification.md` under `outputs/evals/{evalRunId}`.
+
+Eval and benchmark outputs are intentionally gitignored. They may contain private prompts, provider outputs, timing data, and model-comparison notes. Treat them as local evidence until Agentsim can match or beat strong one-shot model baselines on throughput and exceed them on reviewed delivery-package quality.
 
 ## Development
 

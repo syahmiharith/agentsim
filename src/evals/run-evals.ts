@@ -40,6 +40,7 @@ program
     console.log(`Average workflow score: ${report.averageWorkflowScore.toFixed(1)}`);
     console.log(`Average baseline score: ${report.averageBaselineScore.toFixed(1)}`);
     console.log(`Report: ${report.reportPath}`);
+    console.log(`Development justification: ${report.justificationPath}`);
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

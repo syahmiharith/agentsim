@@ -29,7 +29,7 @@ Current capabilities:
 - Mock and OpenAI-compatible model provider boundary.
 - Artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
-- Deterministic eval harness with software-freelance cases, scorecards, one-shot baselines, and an aggregate report.
+- Deterministic eval harness with software-freelance cases, scorecards, one-shot baselines, an aggregate report, and a development-justification report.
 
 The next work should strengthen organizational capability around this spine.
 

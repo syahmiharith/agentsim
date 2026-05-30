@@ -21,6 +21,14 @@ export interface EvalScore {
   criteria: EvalCriterionScore[];
 }
 
+export interface UseCaseJustification {
+  fitScore: number;
+  maxScore: number;
+  verdict: "strong-fit" | "promising" | "weak-fit";
+  reasons: string[];
+  evidence: string[];
+}
+
 export interface EvalCaseResult {
   case: EvalCase;
   runId: string;
@@ -28,6 +36,7 @@ export interface EvalCaseResult {
   scorecardPath: string;
   workflow: EvalScore;
   baseline: EvalScore & { packagePath: string };
+  justification: UseCaseJustification;
   delta: number;
 }
 
@@ -35,9 +44,11 @@ export interface EvalReport {
   evalRunId: string;
   outputDir: string;
   reportPath: string;
+  justificationPath: string;
   cases: EvalCaseResult[];
   averageWorkflowScore: number;
   averageBaselineScore: number;
+  averageUseCaseFitScore: number;
 }
 
 export interface RunEvalsOptions {
@@ -77,6 +88,14 @@ export async function runEvals(options: RunEvalsOptions = {}): Promise<EvalRepor
     });
     const baseline = await writeBaselinePackage(evalCase, baselineDir);
     const scorecardPath = join(casesDir, evalCase.id, "scorecard.json");
+    const delta = workflow.totalScore - baseline.totalScore;
+    const justification = assessUseCaseFit({
+      evalCase,
+      workflow,
+      baseline,
+      delta,
+      finalPackageDir: run.finalPackageDir
+    });
     const result: EvalCaseResult = {
       case: evalCase,
       runId: run.taskRun.id,
@@ -84,7 +103,8 @@ export async function runEvals(options: RunEvalsOptions = {}): Promise<EvalRepor
       scorecardPath,
       workflow,
       baseline,
-      delta: workflow.totalScore - baseline.totalScore
+      justification,
+      delta
     };
 
     await writeFile(scorecardPath, JSON.stringify(result, null, 2), "utf8");
@@ -94,17 +114,22 @@ export async function runEvals(options: RunEvalsOptions = {}): Promise<EvalRepor
 
   const averageWorkflowScore = average(results.map((result) => result.workflow.totalScore));
   const averageBaselineScore = average(results.map((result) => result.baseline.totalScore));
+  const averageUseCaseFitScore = average(results.map((result) => result.justification.fitScore));
   const reportPath = join(outputDir, "eval-report.md");
+  const justificationPath = join(outputDir, "development-justification.md");
   const report: EvalReport = {
     evalRunId,
     outputDir,
     reportPath,
+    justificationPath,
     cases: results,
     averageWorkflowScore,
-    averageBaselineScore
+    averageBaselineScore,
+    averageUseCaseFitScore
   };
 
   await writeFile(reportPath, renderEvalReport(report), "utf8");
+  await writeFile(justificationPath, renderDevelopmentJustification(report), "utf8");
   await writeFile(join(outputDir, "eval-report.json"), JSON.stringify(report, null, 2), "utf8");
   return report;
 }
@@ -198,6 +223,12 @@ async function writeBaselinePackage(evalCase: EvalCase, baselineDir: string): Pr
 
 ${evalCase.goal}
 
+## Use Case
+
+- Target user: ${evalCase.useCase.targetUser}
+- Scenario: ${evalCase.useCase.scenario}
+- Product fit: ${evalCase.useCase.productFit}
+
 ## Simulated Output
 
 A single prompt can outline a plausible ${evalCase.expectedEntityName.toLowerCase()} workflow, but this baseline intentionally has no durable artifact lineage, reviewed final-package structure, runnable app files, approval records, or event trace.
@@ -228,6 +259,16 @@ function renderScorecard(result: EvalCaseResult): string {
 
 Goal: ${result.case.goal}
 
+## Use-Case Justification
+
+- Target user: ${result.case.useCase.targetUser}
+- Scenario: ${result.case.useCase.scenario}
+- Product fit: ${result.case.useCase.productFit}
+- Business justification: ${result.case.useCase.businessJustification}
+- Why Agentsim: ${result.case.useCase.whyAgentsim}
+- One-shot failure mode: ${result.case.useCase.oneShotFailureMode}
+- Fit verdict: ${result.justification.verdict} (${result.justification.fitScore}/${result.justification.maxScore})
+
 | Measure | Workflow | One-shot baseline |
 | --- | ---: | ---: |
 | Total | ${result.workflow.totalScore}/${result.workflow.maxScore} | ${result.baseline.totalScore}/${result.baseline.maxScore} |
@@ -241,6 +282,10 @@ ${result.workflow.criteria.map((criterionScore) => `- ${criterionScore.label}: $
 
 ${result.baseline.criteria.map((criterionScore) => `- ${criterionScore.label}: ${criterionScore.score}/${criterionScore.maxScore} - ${criterionScore.notes}`).join("\n")}
 
+## Fit Evidence
+
+${result.justification.evidence.map((item) => `- ${item}`).join("\n")}
+
 ## Output
 
 - Final package: \`${result.finalPackageDir}\`
@@ -250,28 +295,154 @@ ${result.baseline.criteria.map((criterionScore) => `- ${criterionScore.label}: $
 
 function renderEvalReport(report: EvalReport): string {
   const rows = report.cases.map((result) =>
-    `| ${result.case.title} | ${result.workflow.totalScore}/${result.workflow.maxScore} | ${result.baseline.totalScore}/${result.baseline.maxScore} | +${result.delta} | \`${result.finalPackageDir}\` |`
+    `| ${result.case.title} | ${result.justification.verdict} | ${result.workflow.totalScore}/${result.workflow.maxScore} | ${result.baseline.totalScore}/${result.baseline.maxScore} | +${result.delta} | \`${result.finalPackageDir}\` |`
   ).join("\n");
 
   const losses = report.cases.filter((result) => result.delta <= 0);
+  const strongFits = report.cases.filter((result) => result.justification.verdict === "strong-fit");
   return `# Agentsim Eval Report
 
 Eval run ID: ${report.evalRunId}
 
-| Case | Workflow | One-shot baseline | Delta | Final package |
-| --- | ---: | ---: | ---: | --- |
+| Case | Use-case fit | Workflow | One-shot baseline | Delta | Final package |
+| --- | --- | ---: | ---: | ---: | --- |
 ${rows}
 
 ## Summary
 
 - Average workflow score: ${report.averageWorkflowScore.toFixed(1)}
 - Average one-shot baseline score: ${report.averageBaselineScore.toFixed(1)}
+- Average use-case fit score: ${report.averageUseCaseFitScore.toFixed(1)}/5
+- Strong-fit use cases: ${strongFits.length}/${report.cases.length}
 - Cases where workflow did not beat baseline: ${losses.length === 0 ? "none" : losses.map((result) => result.case.id).join(", ")}
+- Development justification: \`${report.justificationPath}\`
 
 ## Interpretation
 
 Agentsim scores higher when the artifact-first workflow produces a complete package, runnable prototype, explicit QA artifacts, and inspectable trace files. The baseline is useful for initial ideation, but it does not create durable delivery assets or review evidence.
 `;
+}
+
+function renderDevelopmentJustification(report: EvalReport): string {
+  const ranked = [...report.cases].sort((a, b) => b.justification.fitScore - a.justification.fitScore || b.delta - a.delta);
+  const rows = ranked.map((result) =>
+    `| ${result.case.title} | ${result.justification.verdict} | ${result.justification.fitScore}/${result.justification.maxScore} | ${result.delta} | ${result.case.useCase.businessJustification} |`
+  ).join("\n");
+  const topCases = ranked.filter((result) => result.justification.verdict === "strong-fit").slice(0, 3);
+  const weakCases = ranked.filter((result) => result.justification.verdict === "weak-fit");
+
+  return `# Agentsim Development Justification
+
+Eval run ID: ${report.evalRunId}
+
+## Verdict
+
+Agentsim is justified when the target job is not "answer a question", but "produce a reviewed, runnable, traceable delivery package from a vague client request." The current eval evidence supports continuing the software-freelance wedge if future work keeps improving package quality, app runnability, and real-model baseline comparison.
+
+## Public Promotion Gate
+
+Do not promote Agentsim publicly for broad contribution until benchmark runs show it is at least equal to strong one-shot model baselines on throughput and better on delivery-package quality. Minimum evidence should include:
+
+- comparable or better time-to-reviewed-package for the same client request
+- equal or better runnable app success rate
+- stronger handoff completeness, QA coverage, and traceability than a one-shot ChatGPT/Claude-style prompt
+- repeatable results across the core freelance use cases, not only one demo prompt
+
+## Best Initial Use Cases
+
+${topCases.map((result) => `- ${result.case.title}: ${result.case.useCase.whyAgentsim}`).join("\n") || "- No strong-fit use cases found in this run."}
+
+## Use-Case Matrix
+
+| Use case | Fit | Fit score | Workflow delta | Why it matters |
+| --- | --- | ---: | ---: | --- |
+${rows}
+
+## What This Eval Proves
+
+- The workflow can generate a consistent final-package shape across multiple plausible freelance requests.
+- The package includes client, planning, technical, review, app, and trace artifacts.
+- The strongest use cases are client work where scope, review, runnable proof, and handoff discipline matter together.
+- The weakest use cases should either be reframed as workflow/handoff packages or deferred until Agentsim can prove more domain-specific value.
+
+## What This Eval Does Not Prove Yet
+
+- It does not prove superiority against live ChatGPT, Claude, or other current model outputs unless a live one-shot baseline is added.
+- It does not prove the generated apps are production-ready.
+- It does not measure actual freelancer time saved, client acceptance rate, or revision reduction.
+
+## Recommended Next Evidence
+
+- Add a live one-shot baseline mode for OpenAI-compatible and Anthropic-style providers.
+- Run generated app install/build checks and include command traces.
+- Track human review time and number of manual edits needed before client handoff.
+- Add at least one real freelancer project transcript converted into an eval case.
+
+${weakCases.length > 0 ? `## Weak-Fit Cases\n\n${weakCases.map((result) => `- ${result.case.title}: ${result.case.useCase.oneShotFailureMode}`).join("\n")}\n` : ""}
+`;
+}
+
+function assessUseCaseFit(input: {
+  evalCase: EvalCase;
+  workflow: EvalScore;
+  baseline: EvalScore;
+  delta: number;
+  finalPackageDir: string;
+}): UseCaseJustification {
+  const reasons: string[] = [];
+  const evidence: string[] = [];
+  const workflowRatio = input.workflow.totalScore / input.workflow.maxScore;
+  const baselineRatio = input.baseline.totalScore / input.baseline.maxScore;
+  const runnableScore = criterionScore(input.workflow, "runnable-app");
+  const qaScore = criterionScore(input.workflow, "qa-quality");
+  const traceScore = criterionScore(input.workflow, "traceability");
+  const completenessScore = criterionScore(input.workflow, "requirement-completeness");
+
+  let fitScore = 0;
+  if (workflowRatio >= 0.8) {
+    fitScore += 1;
+    reasons.push("workflow package quality cleared the useful-output threshold");
+  }
+  if (input.delta >= 10 && workflowRatio > baselineRatio) {
+    fitScore += 1;
+    reasons.push("structured workflow materially outscored the one-shot baseline");
+  }
+  if (runnableScore >= 4) {
+    fitScore += 1;
+    reasons.push("the use case benefits from a runnable local prototype");
+  }
+  if (qaScore >= 4 && traceScore >= 4) {
+    fitScore += 1;
+    reasons.push("review and traceability are visible enough to support client handoff");
+  }
+  if (completenessScore >= 4 && input.evalCase.useCase.proofSignals.length >= 4) {
+    fitScore += 1;
+    reasons.push("the package produced the artifact classes needed to evaluate the business workflow");
+  }
+
+  const cap = input.evalCase.useCase.productFit === "core-wedge"
+    ? 5
+    : input.evalCase.useCase.productFit === "adjacent-wedge"
+      ? 4
+      : 3;
+  if (fitScore > cap) {
+    fitScore = cap;
+    reasons.push(`fit score capped at ${cap}/5 because this is classified as ${input.evalCase.useCase.productFit}`);
+  }
+
+  evidence.push(`Final package: ${input.finalPackageDir}`);
+  evidence.push(`Expected proof signals: ${input.evalCase.useCase.proofSignals.join(", ")}`);
+  evidence.push(`Workflow score: ${input.workflow.totalScore}/${input.workflow.maxScore}`);
+  evidence.push(`One-shot baseline score: ${input.baseline.totalScore}/${input.baseline.maxScore}`);
+  evidence.push(`Delta: +${input.delta}`);
+
+  return {
+    fitScore,
+    maxScore: 5,
+    verdict: fitScore >= 4 ? "strong-fit" : fitScore >= 3 ? "promising" : "weak-fit",
+    reasons,
+    evidence
+  };
 }
 
 function score(criteria: EvalCriterionScore[]): EvalScore {
@@ -284,6 +455,10 @@ function score(criteria: EvalCriterionScore[]): EvalScore {
 
 function criterion(id: string, label: string, scoreValue: number, notes: string): EvalCriterionScore {
   return { id, label, score: scoreValue, maxScore: 5, notes };
+}
+
+function criterionScore(scorecard: EvalScore, criterionId: string): number {
+  return scorecard.criteria.find((criterionItem) => criterionItem.id === criterionId)?.score ?? 0;
 }
 
 async function countExisting(root: string, relativePaths: string[]): Promise<number> {

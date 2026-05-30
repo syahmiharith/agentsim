@@ -3,6 +3,16 @@ dist/
 coverage/
 outputs/
 
+# Local eval and benchmark runs can include private prompts, provider outputs,
+# timing data, and model comparisons. Keep them out of public commits.
+.agentsim-benchmarks/
+benchmark-results/
+comparison-results/
+eval-results/
+*.local-eval.json
+*.local-eval.jsonl
+*.local-eval.md
+
 *.log
 *.tsbuildinfo
 .DS_Store

@@ -1,8 +1,11 @@
 {
   "python.terminal.useEnvFile": true,
   "npm.packageManager": "pnpm",
-  "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
+  "vitest.rootConfig": "vitest.config.ts",
+  "vitest.configSearchPatternExclude": "{**/node_modules/**,**/vendor/**,**/.*/**,**/*.d.ts,**/dist/**,**/outputs/**}",
+  "vitest.filesWatcherInclude": "{src,tests}/**/*",
   "search.exclude": {
     "**/coverage": true,
     "**/dist": true,
