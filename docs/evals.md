@@ -56,6 +56,8 @@ Suites:
   timeout, safe env, output caps, and `shell: false`.
 - `domainFidelityScore`: expected domain spec, app fields, statuses, and
   forbidden phrase checks.
+- `domainInferencePresent`: optional trace metadata for the matched domain
+  preset, confidence, fallback use, and clarification warnings.
 - `packageCompletenessScore`: required final package files.
 - `traceabilityScore`: events, decisions, approvals, context, and lineage.
 - `reviewabilityScore`: QA, code review, and known-issues artifacts.

@@ -161,7 +161,7 @@ function renderMarkdownReport(report: EvalReport): string {
 
 function renderCsvReport(report: EvalReport): string {
   const rows = [
-    ["caseId", "suite", "difficulty", "runId", "hardGatePassed", "accepted", "qualityScore", "durationMs", "failureCategory", "failureCount", "warningCount", "errorCount", "commandChecksRun", "apiBehaviorPresent", "seedDataPresent", "prompt"],
+    ["caseId", "suite", "difficulty", "runId", "hardGatePassed", "accepted", "qualityScore", "durationMs", "failureCategory", "failureCount", "warningCount", "errorCount", "commandChecksRun", "apiBehaviorPresent", "seedDataPresent", "domainInferencePresent", "domainMatchedPresetId", "domainInferenceConfidence", "domainFallbackUsed", "domainNeedsClarification", "prompt"],
     ...report.results.map((result) => [
       result.caseId,
       result.suite,
@@ -178,6 +178,11 @@ function renderCsvReport(report: EvalReport): string {
       String(result.commandChecksRun),
       String(result.apiBehaviorPresent),
       String(result.seedDataPresent),
+      String(result.domainInferencePresent),
+      result.domainMatchedPresetId ?? "",
+      result.domainInferenceConfidence === undefined ? "" : String(result.domainInferenceConfidence),
+      result.domainFallbackUsed === undefined ? "" : String(result.domainFallbackUsed),
+      result.domainNeedsClarification === undefined ? "" : String(result.domainNeedsClarification),
       result.prompt
     ])
   ];
@@ -224,6 +229,11 @@ function createRuntimeFailure(evalCase: EvalCase, runId: string, finalPackagePat
     contextCoverageOk: false,
     contextProvenanceOk: false,
     domainSpecPresent: false,
+    domainInferencePresent: false,
+    domainMatchedPresetId: undefined,
+    domainInferenceConfidence: undefined,
+    domainFallbackUsed: undefined,
+    domainNeedsClarification: undefined,
     appNameAppearsInApp: false,
     primaryEntityAppearsInApp: false,
     workflowStatusesAppearInApp: false,

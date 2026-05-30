@@ -16,6 +16,7 @@ import { compileAgentStepsToTasks } from "./core/task-compiler.js";
 import { createToolRuntime, hasApprovedAction, requestToolApproval } from "./core/tool-runtime.js";
 import { ToolApprovalRequiredError } from "./core/tools.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
+import type { DomainInferenceResult } from "./domain/domain-inference.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
 import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
 import type {
@@ -73,6 +74,7 @@ interface OrchestratorRuntime {
   modelProvider: ModelProvider;
   domainPack: DomainPack;
   domainSpec: DomainSpec;
+  domainInference: DomainInferenceResult;
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   artifactStore: FileArtifactStore;
@@ -114,7 +116,8 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const messagesRepo = new LocalMessagesRepo(workspace.rootDir);
   const approvalsRepo = new LocalApprovalsRepo(workspace.rootDir);
   const domainPack = options.domainPack ?? softwareFreelancePack;
-  const domainSpec = domainPack.inferDomainSpec(safeGoal);
+  const domainInference = inferWithMetadata(domainPack, safeGoal);
+  const domainSpec = domainInference.spec;
   const steps = options.agentSteps ?? defaultAgentSteps;
   const decisions: Decision[] = [];
   const agentActions: AgentActionRecord[] = [];
@@ -136,6 +139,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     modelProvider: options.modelProvider,
     domainPack,
     domainSpec,
+    domainInference,
     workspace,
     workspaceDriver: driver,
     artifactStore,
@@ -228,6 +232,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const artifactStore = new FileArtifactStore(workspace, artifacts);
   const domainPack = options.domainPack ?? softwareFreelancePack;
   const domainSpec = await loadPersistedDomainSpec(runRoot, domainPack, existingRun.userGoal);
+  const domainInference = await loadPersistedDomainInference(runRoot, domainPack, existingRun.userGoal, domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const existingTasks = await tasksRepo.listTasksByRun();
   if (existingTasks.length === 0) {
@@ -271,6 +276,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     modelProvider: options.modelProvider,
     domainPack,
     domainSpec,
+    domainInference,
     workspace,
     workspaceDriver: driver,
     artifactStore,
@@ -726,6 +732,7 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
 
   await runtime.runsRepo.createRun(runState);
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
   await runtime.tasksRepo.saveTasks(compileAgentStepsToTasks(runtime.runId, runtime.steps));
   await runtime.eventStore.append({
     level: "info",
@@ -738,7 +745,11 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
       domainPackId: runtime.domainPack.id,
       appName: runtime.domainSpec.appName,
       domain: runtime.domainSpec.domain,
-      primaryEntity: runtime.domainSpec.primaryEntity.name
+      primaryEntity: runtime.domainSpec.primaryEntity.name,
+      matchedPresetId: runtime.domainInference.matchedPresetId,
+      confidence: runtime.domainInference.confidence,
+      needsClarification: runtime.domainInference.needsClarification,
+      fallbackUsed: runtime.domainInference.fallbackUsed
     }
   });
 
@@ -874,6 +885,7 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   const traceApprovals = mergeApprovalsById(await runtime.approvalsRepo.listApprovalsByRun());
 
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/decisions.json"), JSON.stringify({ decisions: runtime.decisions }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals: traceApprovals }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-messages.json"), JSON.stringify({ messages: runtime.agentMessages }, null, 2), "utf8");
@@ -979,6 +991,42 @@ async function loadPersistedDomainSpec(runRoot: string, domainPack: DomainPack, 
   } catch {
     return domainPack.inferDomainSpec(goal);
   }
+}
+
+async function loadPersistedDomainInference(runRoot: string, domainPack: DomainPack, goal: string, domainSpec: DomainSpec): Promise<DomainInferenceResult> {
+  try {
+    const persisted = JSON.parse(await readFile(safeJoin(runRoot, "state/domain-inference.json"), "utf8")) as Omit<DomainInferenceResult, "spec">;
+    return { ...persisted, spec: domainSpec };
+  } catch {
+    return { ...inferWithMetadata(domainPack, goal), spec: domainSpec };
+  }
+}
+
+function inferWithMetadata(domainPack: DomainPack, goal: string): DomainInferenceResult {
+  if (domainPack.inferDomainSpecResult) {
+    return domainPack.inferDomainSpecResult(goal);
+  }
+  const spec = domainPack.inferDomainSpec(goal);
+  return {
+    spec,
+    confidence: 0.5,
+    matchedPresetId: "unknown",
+    matchedKeywords: [],
+    warnings: ["Domain pack does not expose inference metadata."],
+    needsClarification: false,
+    fallbackUsed: false
+  };
+}
+
+function traceDomainInference(result: DomainInferenceResult): Omit<DomainInferenceResult, "spec"> {
+  return {
+    matchedPresetId: result.matchedPresetId,
+    confidence: result.confidence,
+    matchedKeywords: result.matchedKeywords,
+    warnings: result.warnings,
+    needsClarification: result.needsClarification,
+    fallbackUsed: result.fallbackUsed
+  };
 }
 
 function mergeApprovalsById(approvals: Approval[]): Approval[] {

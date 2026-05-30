@@ -48,6 +48,7 @@ describe("demo workflow", () => {
       "trace/approvals.json",
       "trace/decisions.json",
       "trace/domain-spec.json",
+      "trace/domain-inference.json",
       "trace/artifact-lineage.json",
       "trace/run-summary.json"
     ];
@@ -105,8 +106,12 @@ describe("demo workflow", () => {
     const stateContextPackages = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "context-packages.json"), "utf8"));
     const stateEvents = await readFile(join(outputRoot, "test-run", "state", "events.jsonl"), "utf8");
     const stateDomainSpec = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-spec.json"), "utf8"));
+    const stateDomainInference = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-inference.json"), "utf8"));
+    const traceDomainInference = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-inference.json"), "utf8"));
     expect(stateRun.status).toBe("completed");
     expect(stateDomainSpec.appName).toBe("Inventory Request Desk");
+    expect(stateDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
+    expect(traceDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
     expect(stateTasks.every((task: { status: string; attempts: number }) => task.status === "completed" && task.attempts === 1)).toBe(true);
     expect(stateArtifacts).toHaveLength(result.artifacts.length);
     expect(stateContextPackages).toHaveLength(agentActions.actions.length);

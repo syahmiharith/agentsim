@@ -34,6 +34,11 @@ export interface EvalCaseResult {
   contextCoverageOk: boolean;
   contextProvenanceOk: boolean;
   domainSpecPresent: boolean;
+  domainInferencePresent: boolean;
+  domainMatchedPresetId?: string;
+  domainInferenceConfidence?: number;
+  domainFallbackUsed?: boolean;
+  domainNeedsClarification?: boolean;
   appNameAppearsInApp: boolean;
   primaryEntityAppearsInApp: boolean;
   workflowStatusesAppearInApp: boolean;
@@ -109,6 +114,7 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   }
 
   const traceDomainSpec = await readJsonFile<DomainSpec>(root, "trace/domain-spec.json");
+  const traceDomainInference = await readJsonFile<DomainInferenceTrace>(root, "trace/domain-inference.json");
   const contextEvaluation = (await readJsonFile<{ evaluation: ContextEvaluation }>(root, "trace/context-eval.json"))?.evaluation;
   const appSource = await readText(root, "app/src/App.tsx") ?? "";
   const appReadme = await readText(root, "app/README.md") ?? "";
@@ -145,6 +151,26 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     }
   }
 
+  const domainInferencePresent = isDomainInferenceTrace(traceDomainInference);
+  if (domainInferencePresent) {
+    if (traceDomainInference.fallbackUsed && evalCase.expected.appName !== "Client Request Tracker") {
+      failures.push({
+        code: "domain_inference_unexpected_fallback",
+        message: "Domain inference used fallback for a non-fallback eval case.",
+        severity: "warn",
+        path: "trace/domain-inference.json"
+      });
+    }
+    if (traceDomainInference.needsClarification) {
+      failures.push({
+        code: "domain_inference_needs_clarification",
+        message: "Domain inference marked this strict eval case as needing clarification.",
+        severity: "warn",
+        path: "trace/domain-inference.json"
+      });
+    }
+  }
+
   for (const phrase of evalCase.expected.requiredPhrases) {
     failures.push(...await assertFileContains(root, phrase.path, phrase.terms));
   }
@@ -171,8 +197,6 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const secretLeakageDetected = await detectSecretLeakage(root, evalCase.prompt);
   const commandChecksRun = evalCase.expected.commands?.length ?? 0;
   const requiredCommandChecksRun = evalCase.expected.commands?.filter((command) => !command.optional).length ?? 0;
-  const warningCount = failures.filter((item) => item.severity === "warn").length;
-  const errorCount = failures.filter((item) => item.severity === "error").length;
 
   if (!appNameAppearsInApp) {
     failures.push({ code: "app_name_missing", message: `App surface does not contain app name ${evalCase.expected.appName}`, severity: "error", path: "app/src/App.tsx" });
@@ -205,9 +229,11 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const requiredArtifactFailures = failures.filter((item) => item.code === "final_package_file_missing" || item.code === "trace_file_missing").length;
   const requiredPhraseFailures = failures.filter((item) => item.code === "required_phrase_missing").length;
   const forbiddenPhraseFailures = failures.filter((item) => item.code === "forbidden_phrase_present").length;
-  const domainFailures = failures.filter((item) => item.code.startsWith("domain_") || item.code === "app_name_missing" || item.code === "primary_entity_missing" || item.code === "workflow_statuses_missing" || item.code === "required_fields_missing" || item.code === "domain_docs_mismatch").length;
+  const domainFailures = failures.filter((item) => item.severity === "error" && (item.code.startsWith("domain_") || item.code === "app_name_missing" || item.code === "primary_entity_missing" || item.code === "workflow_statuses_missing" || item.code === "required_fields_missing" || item.code === "domain_docs_mismatch")).length;
   const traceFailures = failures.filter((item) => item.code === "trace_file_missing" || item.code.startsWith("context_") || item.code.includes("lineage")).length;
   const reviewFailures = failures.filter((item) => item.path?.startsWith("review/") && item.severity === "error").length;
+  const warningCount = failures.filter((item) => item.severity === "warn").length;
+  const errorCount = failures.filter((item) => item.severity === "error").length;
 
   const acceptanceCriteriaScore = ratio(1 + evalCase.expected.requiredPhrases.reduce((sum, item) => sum + item.terms.length, 0), requiredPhraseFailures + (domainDocsMatch ? 0 : 1));
   const runnableAppScore = ratio(requiredAppFiles.length + 1 + 2 + requiredCommandChecksRun, appFileFailures + (finalValidationOk ? 0 : 1) + apiFailures + commandFailures);
@@ -248,6 +274,11 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     contextCoverageOk,
     contextProvenanceOk,
     domainSpecPresent,
+    domainInferencePresent,
+    domainMatchedPresetId: domainInferencePresent ? traceDomainInference.matchedPresetId : undefined,
+    domainInferenceConfidence: domainInferencePresent ? traceDomainInference.confidence : undefined,
+    domainFallbackUsed: domainInferencePresent ? traceDomainInference.fallbackUsed : undefined,
+    domainNeedsClarification: domainInferencePresent ? traceDomainInference.needsClarification : undefined,
     appNameAppearsInApp,
     primaryEntityAppearsInApp,
     workflowStatusesAppearInApp,
@@ -379,6 +410,27 @@ function isDomainSpec(value: DomainSpec | undefined): value is DomainSpec {
     typeof value.primaryEntity?.name === "string" &&
     Array.isArray(value.primaryEntity?.fields) &&
     Array.isArray(value.workflowStatuses)
+  );
+}
+
+interface DomainInferenceTrace {
+  matchedPresetId: string;
+  confidence: number;
+  matchedKeywords: string[];
+  warnings: string[];
+  needsClarification: boolean;
+  fallbackUsed: boolean;
+}
+
+function isDomainInferenceTrace(value: DomainInferenceTrace | undefined): value is DomainInferenceTrace {
+  return Boolean(
+    value &&
+    typeof value.matchedPresetId === "string" &&
+    typeof value.confidence === "number" &&
+    Array.isArray(value.matchedKeywords) &&
+    Array.isArray(value.warnings) &&
+    typeof value.needsClarification === "boolean" &&
+    typeof value.fallbackUsed === "boolean"
   );
 }
 

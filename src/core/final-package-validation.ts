@@ -138,11 +138,53 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   const contextPackages = await validateContextPackages(input.finalPackageDir, failures);
   await validateContextEvaluation(input.finalPackageDir, failures);
   await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, contextPackages, failures);
+  await validateDomainInferenceTrace(input.finalPackageDir, failures);
 
   return {
     ok: failures.length === 0,
     failures
   };
+}
+
+async function validateDomainInferenceTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const inferencePath = join(finalPackageDir, "trace", "domain-inference.json");
+  if (!(await pathExists(inferencePath))) {
+    return;
+  }
+
+  let inference: {
+    matchedPresetId?: unknown;
+    confidence?: unknown;
+    matchedKeywords?: unknown;
+    warnings?: unknown;
+    needsClarification?: unknown;
+    fallbackUsed?: unknown;
+  };
+  try {
+    inference = JSON.parse(await readFile(inferencePath, "utf8"));
+  } catch {
+    failures.push("Domain inference trace is not valid JSON");
+    return;
+  }
+
+  if (typeof inference.matchedPresetId !== "string" || inference.matchedPresetId.length === 0) {
+    failures.push("Domain inference trace is missing matchedPresetId");
+  }
+  if (typeof inference.confidence !== "number" || inference.confidence < 0 || inference.confidence > 1) {
+    failures.push("Domain inference trace confidence must be between 0 and 1");
+  }
+  if (!Array.isArray(inference.matchedKeywords) || !inference.matchedKeywords.every((item) => typeof item === "string")) {
+    failures.push("Domain inference trace matchedKeywords must be an array of strings");
+  }
+  if (!Array.isArray(inference.warnings) || !inference.warnings.every((item) => typeof item === "string")) {
+    failures.push("Domain inference trace warnings must be an array of strings");
+  }
+  if (typeof inference.needsClarification !== "boolean") {
+    failures.push("Domain inference trace needsClarification must be boolean");
+  }
+  if (typeof inference.fallbackUsed !== "boolean") {
+    failures.push("Domain inference trace fallbackUsed must be boolean");
+  }
 }
 
 async function validateAgentActions(

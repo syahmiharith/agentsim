@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -202,7 +202,9 @@ describe("scheduler-driven orchestrator", () => {
 
     const runRoot = join(outputRoot, "resume-run");
     const pausedContextPackages = JSON.parse(await readFile(join(runRoot, "state", "context-packages.json"), "utf8")) as ContextPackage[];
+    const pausedDomainInference = JSON.parse(await readFile(join(runRoot, "state", "domain-inference.json"), "utf8"));
     expect(pausedContextPackages.length).toBeGreaterThan(0);
+    expect(pausedDomainInference.matchedPresetId).toBe("fallback-client-request-tracker");
     const approvalsRepo = new LocalApprovalsRepo(runRoot);
     const tasksRepo = new LocalTasksRepo(runRoot);
     const runsRepo = new LocalRunsRepo(runRoot);
@@ -227,6 +229,7 @@ describe("scheduler-driven orchestrator", () => {
       seedRecords: []
     };
     await writeFile(join(runRoot, "state", "domain-spec.json"), `${JSON.stringify(persistedDomainSpec, null, 2)}\n`, "utf8");
+    await unlink(join(runRoot, "state", "domain-inference.json"));
     shouldPause = false;
 
     const resumed = await resumeOrchestrator({
@@ -244,8 +247,10 @@ describe("scheduler-driven orchestrator", () => {
     const traceActions = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "agent-actions.json"), "utf8")) as { actions: AgentActionRecord[] };
     const traceContextEval = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "context-eval.json"), "utf8")) as { evaluation: { requiredCoverageOk: boolean; provenanceOk: boolean; failures: string[] } };
     const traceApprovals = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "approvals.json"), "utf8"));
+    const traceDomainInference = JSON.parse(await readFile(join(outputRoot, "resume-run", "final-package", "trace", "domain-inference.json"), "utf8"));
     expect(resumed.taskRun.status).toBe("COMPLETED");
     expect(resumed.domainSpec.appName).toBe("Persisted Resume Desk");
+    expect(traceDomainInference).toMatchObject({ matchedPresetId: "fallback-client-request-tracker", fallbackUsed: true });
     expect(run.status).toBe("completed");
     expect(tasks.every((task: { status: string }) => task.status === "completed")).toBe(true);
     expect(contextPackages.length).toBeGreaterThan(pausedContextPackages.length);

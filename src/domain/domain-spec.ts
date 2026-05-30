@@ -25,6 +25,7 @@ export interface DomainSpec {
   sourceGoal: string;
   appName: string;
   appSlug: string;
+  appArchetype?: "simple-workflow";
   domain: string;
   primaryEntity: EntitySpec;
   supportingEntities: EntitySpec[];
@@ -38,4 +39,3 @@ export interface DomainSpec {
   risks: string[];
   seedRecords: Array<Record<string, string | number>>;
 }
-

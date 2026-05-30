@@ -3,12 +3,14 @@ import type { DomainSpec } from "../domain/domain-spec.js";
 import type { Workspace, WorkspaceDriver } from "../types.js";
 
 export async function writeGeneratedApp(workspace: Workspace, driver: WorkspaceDriver, spec: DomainSpec): Promise<void> {
+  assertSupportedDomainSpec(spec);
   for (const [path, content] of Object.entries(renderGeneratedAppFiles(workspace, spec))) {
     await driver.writeFile(workspace, path, content);
   }
 }
 
 export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spec: DomainSpec): Record<string, string> {
+  assertSupportedDomainSpec(spec);
   return {
     "app/package.json": appPackageJson(spec),
     "app/index.html": indexHtml(spec),
@@ -21,6 +23,13 @@ export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spe
     "app/src/styles.css": stylesCss(),
     "app/README.md": appReadme(workspace.runId, spec)
   };
+}
+
+function assertSupportedDomainSpec(spec: DomainSpec): void {
+  const appArchetype = spec.appArchetype as string | undefined;
+  if (appArchetype && appArchetype !== "simple-workflow") {
+    throw new Error(`Unsupported domain app archetype: ${appArchetype}`);
+  }
 }
 
 function appPackageJson(spec: DomainSpec): string {

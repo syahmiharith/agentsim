@@ -1,4 +1,5 @@
 import type { DomainSpec } from "./domain/domain-spec.js";
+import type { DomainInferenceResult } from "./domain/domain-inference.js";
 
 export type ArtifactStatus = "draft" | "reviewed" | "approved" | "rejected" | "superseded" | "exported" | "failed";
 export type ReviewStatus = "not_required" | "pending" | "passed" | "failed";
@@ -434,6 +435,7 @@ export interface DomainPack {
   requiredTraceFiles: string[];
   reviewRubric: ReviewRubricCriterion[];
   inferDomainSpec(goal: string): DomainSpec;
+  inferDomainSpecResult?: (goal: string) => DomainInferenceResult;
 }
 
 export interface AgentContext {

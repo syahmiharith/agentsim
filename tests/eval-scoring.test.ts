@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
+import { inferDomainSpec, inferDomainSpecResult } from "../src/domain/mock-domain-spec.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { scoreEvalRun, summarizeEvalResults } from "../src/evals/scoring.js";
 import type { DomainSpec } from "../src/domain/domain-spec.js";
@@ -30,6 +30,26 @@ describe("eval scoring", () => {
     expect(result.failureCategory).toBe("none");
     expect(result.failures).toEqual([]);
     expect(summarizeEvalResults([result])).toMatchObject({ total: 1, passed: 1, failed: 0, acceptedRuns: 1 });
+  });
+
+  it("records optional domain inference metadata without hard-gating it", async () => {
+    const inference = inferDomainSpecResult("Build an inventory request system for a flower company");
+    const result = await scoreEvalRun(inference.spec.sourceGoal, "run", await createEvalFixture(inference.spec, {
+      traceDomainInference: {
+        matchedPresetId: inference.matchedPresetId,
+        confidence: inference.confidence,
+        matchedKeywords: inference.matchedKeywords,
+        warnings: inference.warnings,
+        needsClarification: inference.needsClarification,
+        fallbackUsed: inference.fallbackUsed
+      }
+    }), { durationMs: 1 });
+
+    expect(result.domainInferencePresent).toBe(true);
+    expect(result.domainMatchedPresetId).toBe("inventory-request");
+    expect(result.domainFallbackUsed).toBe(false);
+    expect(result.domainNeedsClarification).toBe(false);
+    expect(result.failures).toEqual([]);
   });
 
   it("fails when the trace domain spec drifts from the generated domain", async () => {
@@ -165,6 +185,7 @@ async function createEvalFixture(
     appSource?: string;
     appReadme?: string;
     serverSource?: string;
+    traceDomainInference?: unknown;
   } = {}
 ): Promise<RunDemoResult> {
   const finalPackageDir = join(tmpdir(), `agentsim-eval-score-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -204,6 +225,9 @@ async function createEvalFixture(
       validationResult: { ok: true, failures: [] },
       failures: []
     }, null, 2));
+  }
+  if (options.traceDomainInference) {
+    await writeFixtureFile(finalPackageDir, "trace/domain-inference.json", JSON.stringify(options.traceDomainInference, null, 2));
   }
   await writeOtherTraceFiles(finalPackageDir, omittedTraceFiles);
 

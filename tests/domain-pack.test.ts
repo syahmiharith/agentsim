@@ -49,6 +49,15 @@ describe("softwareFreelancePack", () => {
     expect(spec.workflowStatuses).toContain(status);
   });
 
+  it("exposes backwards-compatible domain inference metadata", () => {
+    const result = softwareFreelancePack.inferDomainSpecResult?.("Build an inventory request system for a flower company");
+
+    expect(result?.matchedPresetId).toBe("inventory-request");
+    expect(result?.spec.appName).toBe("Inventory Request Desk");
+    expect(result?.fallbackUsed).toBe(false);
+    expect(result?.needsClarification).toBe(false);
+  });
+
   it("keeps manifest owners tied to executable agent steps", () => {
     const agentIds = new Set(softwareFreelancePack.agents.map((agent) => agent.id));
     const stepOutputTypes = new Set(agentSteps.map((step) => step.outputType));

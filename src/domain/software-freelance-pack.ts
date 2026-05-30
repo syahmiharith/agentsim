@@ -1,6 +1,6 @@
 import { agents } from "../agents/agents.js";
 import type { ArtifactManifestItem, DomainPack, ReviewRubricCriterion } from "../types.js";
-import { inferDomainSpec } from "./mock-domain-spec.js";
+import { inferDomainSpec, inferDomainSpecResult } from "./mock-domain-spec.js";
 
 const artifactManifest: ArtifactManifestItem[] = [
   manifest("proposal", "Proposal", "client-intake", "client/proposal.md", false),
@@ -82,7 +82,8 @@ export const softwareFreelancePack: DomainPack = {
     "trace/artifact-lineage.json"
   ],
   reviewRubric,
-  inferDomainSpec
+  inferDomainSpec,
+  inferDomainSpecResult
 };
 
 function manifest(
