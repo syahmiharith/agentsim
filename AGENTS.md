@@ -14,6 +14,27 @@ Agentsim is **not** trying to create a new foundation model. It is a **BYOK cont
 
 ---
 
+## Documentation Reference Rule
+
+When implementation direction is uncertain, check the repository documentation before inventing a new product path.
+
+Use these references in order:
+
+```text
+README.md
+docs/milestones.md
+examples/software-freelance/evals/cases.md
+CONTRIBUTING.md
+SECURITY.md
+tests/
+```
+
+Treat `docs/milestones.md` as the current development roadmap. Treat `README.md` as the user-facing project promise. Treat eval cases and tests as executable expectations for the current vertical slice.
+
+If documentation and code disagree, prefer the code for current behavior, then update the smallest relevant documentation or implementation surface so future work has one clear source of truth.
+
+---
+
 ## Core Product Vision
 
 Long-term vision:

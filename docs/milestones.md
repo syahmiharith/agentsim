@@ -14,6 +14,19 @@ solo freelance software developer
 
 Complexity should increase through artifacts, memory, decisions, workflows, and execution rights, not by adding more agents first.
 
+## How To Use This Roadmap
+
+This document is the development roadmap for Agentsim. When product direction is unclear, use it with `AGENTS.md` and `README.md` before expanding scope.
+
+Decision order:
+
+1. Preserve the current CLI vertical slice.
+2. Improve artifact quality, traceability, review, and runnable output.
+3. Keep infrastructure replaceable behind thin contracts.
+4. Delay dashboards, marketplaces, SaaS features, and broad domain support until the software-freelance workflow is clearly useful.
+
+If a proposed change does not strengthen the current `goal -> reviewed final package` loop, defer it or write down why it is necessary now.
+
 ## Current Position
 
 Agentsim already has the first CLI-shaped proof:
