@@ -1,18 +1,19 @@
 import { basename } from "node:path";
+import type { DomainSpec } from "../domain/domain-spec.js";
 import type { Workspace, WorkspaceDriver } from "../types.js";
 
-export async function writeGeneratedApp(workspace: Workspace, driver: WorkspaceDriver): Promise<void> {
+export async function writeGeneratedApp(workspace: Workspace, driver: WorkspaceDriver, spec: DomainSpec): Promise<void> {
   const files: Record<string, string> = {
-    "app/package.json": appPackageJson(),
-    "app/index.html": indexHtml(),
+    "app/package.json": appPackageJson(spec),
+    "app/index.html": indexHtml(spec),
     "app/tsconfig.json": appTsconfig(),
     "app/vite.config.ts": viteConfig(),
-    "app/server.js": serverJs(),
-    "app/data/requests.json": `${JSON.stringify(seedRequests(), null, 2)}\n`,
+    "app/server.js": serverJs(spec),
+    [`app/data/${spec.primaryEntity.slug}.json`]: `${JSON.stringify(seedRecords(spec), null, 2)}\n`,
     "app/src/main.tsx": mainTsx(),
-    "app/src/App.tsx": appTsx(),
+    "app/src/App.tsx": appTsx(spec),
     "app/src/styles.css": stylesCss(),
-    "app/README.md": appReadme(workspace.runId)
+    "app/README.md": appReadme(workspace.runId, spec)
   };
 
   for (const [path, content] of Object.entries(files)) {
@@ -20,10 +21,10 @@ export async function writeGeneratedApp(workspace: Workspace, driver: WorkspaceD
   }
 }
 
-function appPackageJson(): string {
+function appPackageJson(spec: DomainSpec): string {
   return `${JSON.stringify(
     {
-      name: "flower-inventory-requests",
+      name: spec.appSlug,
       version: "0.1.0",
       private: true,
       type: "module",
@@ -41,8 +42,8 @@ function appPackageJson(): string {
         "@vitejs/plugin-react": "^4.5.0",
         "@types/react": "^19.1.0",
         "@types/react-dom": "^19.1.0",
-        "typescript": "^5.8.0",
-        "vite": "^6.3.0"
+        typescript: "^5.8.0",
+        vite: "^6.3.0"
       }
     },
     null,
@@ -50,13 +51,13 @@ function appPackageJson(): string {
   )}\n`;
 }
 
-function indexHtml(): string {
+function indexHtml(spec: DomainSpec): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Flower Inventory Requests</title>
+    <title>${escapeHtml(spec.appName)}</title>
   </head>
   <body>
     <div id="root"></div>
@@ -121,81 +122,107 @@ createRoot(document.getElementById("root")!).render(
 `;
 }
 
-function appTsx(): string {
+function appTsx(spec: DomainSpec): string {
+  const config = {
+    appName: spec.appName,
+    domain: spec.domain,
+    primaryEntityName: spec.primaryEntity.name,
+    primaryEntityPluralName: spec.primaryEntity.pluralName,
+    entitySlug: spec.primaryEntity.slug,
+    collectionKey: spec.primaryEntity.slug,
+    initialStatus: spec.workflowStatuses[0] ?? "Requested",
+    fields: spec.primaryEntity.fields,
+    statuses: spec.workflowStatuses,
+    targetUsers: spec.targetUsers,
+    screens: spec.screens,
+    coreActions: spec.coreActions
+  };
+
   return `import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type Priority = "Low" | "Normal" | "High";
-type Status = "Pending" | "Approved" | "Ordered" | "Fulfilled" | "Rejected";
+type FieldType = "text" | "number" | "date" | "datetime" | "select" | "textarea";
+type FormValue = string | number;
 
-interface InventoryRequest {
+interface FieldConfig {
+  name: string;
+  label: string;
+  type: FieldType;
+  required: boolean;
+  options?: string[];
+}
+
+interface AppConfig {
+  appName: string;
+  domain: string;
+  primaryEntityName: string;
+  primaryEntityPluralName: string;
+  entitySlug: string;
+  collectionKey: string;
+  initialStatus: string;
+  fields: FieldConfig[];
+  statuses: string[];
+  targetUsers: string[];
+  screens: Array<{ name: string; purpose: string; actions: string[] }>;
+  coreActions: string[];
+}
+
+interface RecordItem extends Record<string, FormValue> {
   id: string;
-  itemName: string;
-  quantity: number;
-  requester: string;
-  priority: Priority;
-  status: Status;
-  notes: string;
+  status: string;
   createdAt: string;
   updatedAt: string;
 }
 
-const statuses: Status[] = ["Pending", "Approved", "Ordered", "Fulfilled", "Rejected"];
-const priorities: Priority[] = ["Low", "Normal", "High"];
+const appConfig: AppConfig = ${JSON.stringify(config, null, 2)};
 const apiBase = "http://127.0.0.1:4178/api";
 
 export default function App() {
-  const [requests, setRequests] = useState<InventoryRequest[]>([]);
-  const [statusFilter, setStatusFilter] = useState<Status | "All">("All");
-  const [form, setForm] = useState({
-    itemName: "",
-    quantity: 1,
-    requester: "",
-    priority: "Normal" as Priority,
-    notes: ""
-  });
+  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [form, setForm] = useState<Record<string, FormValue>>(createInitialForm());
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  async function loadRequests() {
+  async function loadRecords() {
     setIsLoading(true);
-    const response = await fetch(\`\${apiBase}/requests\`);
+    const response = await fetch(\`\${apiBase}/\${appConfig.entitySlug}\`);
     const data = await response.json();
-    setRequests(data.requests);
+    setRecords(data[appConfig.collectionKey] ?? []);
     setIsLoading(false);
   }
 
   useEffect(() => {
-    loadRequests().catch((err) => {
-      setError(err instanceof Error ? err.message : "Unable to load requests.");
+    loadRecords().catch((err) => {
+      setError(err instanceof Error ? err.message : \`Unable to load \${appConfig.primaryEntityPluralName.toLowerCase()}.\`);
       setIsLoading(false);
     });
   }, []);
 
-  const visibleRequests = useMemo(() => {
-    if (statusFilter === "All") return requests;
-    return requests.filter((request) => request.status === statusFilter);
-  }, [requests, statusFilter]);
+  const visibleRecords = useMemo(() => {
+    if (statusFilter === "All") return records;
+    return records.filter((record) => record.status === statusFilter);
+  }, [records, statusFilter]);
 
-  async function createRequest(event: FormEvent) {
+  async function createRecord(event: FormEvent) {
     event.preventDefault();
     setError("");
-    const response = await fetch(\`\${apiBase}/requests\`, {
+    const response = await fetch(\`\${apiBase}/\${appConfig.entitySlug}\`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(form)
     });
     if (!response.ok) {
       const body = await response.json();
-      setError(body.error ?? "Request could not be created.");
+      setError(body.error ?? \`\${appConfig.primaryEntityName} could not be created.\`);
       return;
     }
-    setForm({ itemName: "", quantity: 1, requester: "", priority: "Normal", notes: "" });
-    await loadRequests();
+    setForm(createInitialForm());
+    await loadRecords();
   }
 
-  async function updateStatus(id: string, status: Status) {
+  async function updateStatus(id: string, status: string) {
     setError("");
-    const response = await fetch(\`\${apiBase}/requests/\${id}/status\`, {
+    const response = await fetch(\`\${apiBase}/\${appConfig.entitySlug}/\${id}/status\`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status })
@@ -205,105 +232,78 @@ export default function App() {
       setError(body.error ?? "Status could not be updated.");
       return;
     }
-    await loadRequests();
+    await loadRecords();
   }
+
+  const titleField = appConfig.fields[0];
+  const detailFields = appConfig.fields.slice(1, 5);
+  const createScreen = appConfig.screens[0]?.name ?? \`New \${appConfig.primaryEntityName}\`;
+  const listScreen = appConfig.screens[1]?.name ?? \`\${appConfig.primaryEntityName} List\`;
 
   return (
     <main className="app-shell">
       <section className="header">
         <div>
-          <p className="overline">Flower Company Operations</p>
-          <h1>Inventory Request Desk</h1>
+          <p className="overline">{appConfig.domain}</p>
+          <h1>{appConfig.appName}</h1>
           <p className="summary">
-            Create replenishment requests, monitor the queue, and move each item through a simple fulfillment workflow.
+            Create, review, and update {appConfig.primaryEntityPluralName.toLowerCase()} through a focused local workflow for {appConfig.targetUsers.join(", ")}.
           </p>
         </div>
         <div className="metric">
-          <span>{requests.length}</span>
-          <small>Total requests</small>
+          <span>{records.length}</span>
+          <small>Total {appConfig.primaryEntityPluralName.toLowerCase()}</small>
         </div>
       </section>
 
       <section className="layout">
-        <form className="panel form-panel" onSubmit={createRequest}>
-          <h2>New Request</h2>
-          <label>
-            Item name
-            <input
-              value={form.itemName}
-              onChange={(event) => setForm({ ...form, itemName: event.target.value })}
-              placeholder="e.g. White roses"
+        <form className="panel form-panel" onSubmit={createRecord}>
+          <h2>{createScreen}</h2>
+          {appConfig.fields.map((field) => (
+            <FieldInput
+              key={field.name}
+              field={field}
+              value={form[field.name] ?? ""}
+              onChange={(value) => setForm({ ...form, [field.name]: value })}
             />
-          </label>
-          <label>
-            Quantity
-            <input
-              type="number"
-              min="1"
-              value={form.quantity}
-              onChange={(event) => setForm({ ...form, quantity: Number(event.target.value) })}
-            />
-          </label>
-          <label>
-            Requester
-            <input
-              value={form.requester}
-              onChange={(event) => setForm({ ...form, requester: event.target.value })}
-              placeholder="Team member"
-            />
-          </label>
-          <label>
-            Priority
-            <select
-              value={form.priority}
-              onChange={(event) => setForm({ ...form, priority: event.target.value as Priority })}
-            >
-              {priorities.map((priority) => (
-                <option key={priority}>{priority}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Notes
-            <textarea
-              value={form.notes}
-              onChange={(event) => setForm({ ...form, notes: event.target.value })}
-              placeholder="Optional supplier, event, or timing context"
-            />
-          </label>
-          <button type="submit">Create request</button>
+          ))}
+          <button type="submit">Create {appConfig.primaryEntityName.toLowerCase()}</button>
           {error ? <p className="error">{error}</p> : null}
         </form>
 
         <section className="panel queue-panel">
           <div className="queue-heading">
-            <h2>Admin Queue</h2>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as Status | "All")}>
+            <h2>{listScreen}</h2>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option>All</option>
-              {statuses.map((status) => (
+              {appConfig.statuses.map((status) => (
                 <option key={status}>{status}</option>
               ))}
             </select>
           </div>
 
-          {isLoading ? <p className="muted">Loading requests...</p> : null}
-          {!isLoading && visibleRequests.length === 0 ? <p className="muted">No requests match this view.</p> : null}
+          {isLoading ? <p className="muted">Loading {appConfig.primaryEntityPluralName.toLowerCase()}...</p> : null}
+          {!isLoading && visibleRecords.length === 0 ? <p className="muted">No records match this view.</p> : null}
 
-          <div className="request-list">
-            {visibleRequests.map((request) => (
-              <article className="request-card" key={request.id}>
+          <div className="record-list">
+            {visibleRecords.map((record) => (
+              <article className="record-card" key={record.id}>
                 <div>
-                  <div className="request-title">
-                    <h3>{request.itemName}</h3>
-                    <span className={\`status status-\${request.status.toLowerCase()}\`}>{request.status}</span>
+                  <div className="record-title">
+                    <h3>{formatValue(record[titleField.name])}</h3>
+                    <span className={\`status \${statusClass(record.status)}\`}>{record.status}</span>
                   </div>
-                  <p>
-                    {request.quantity} requested by {request.requester} - {request.priority} priority
-                  </p>
-                  {request.notes ? <p className="notes">{request.notes}</p> : null}
+                  <dl>
+                    {detailFields.map((field) => (
+                      <div key={field.name}>
+                        <dt>{field.label}</dt>
+                        <dd>{formatValue(record[field.name])}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
-                <select value={request.status} onChange={(event) => updateStatus(request.id, event.target.value as Status)}>
-                  {statuses.map((status) => (
+                <select value={record.status} onChange={(event) => updateStatus(record.id, event.target.value)}>
+                  {appConfig.statuses.map((status) => (
                     <option key={status}>{status}</option>
                   ))}
                 </select>
@@ -315,13 +315,84 @@ export default function App() {
     </main>
   );
 }
+
+function FieldInput(props: { field: FieldConfig; value: FormValue; onChange: (value: FormValue) => void }) {
+  const { field, value, onChange } = props;
+  const inputType = field.type === "datetime" ? "datetime-local" : field.type;
+
+  if (field.type === "textarea") {
+    return (
+      <label>
+        {field.label}
+        <textarea
+          required={field.required}
+          value={String(value)}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={field.required ? field.label : "Optional context"}
+        />
+      </label>
+    );
+  }
+
+  if (field.type === "select") {
+    return (
+      <label>
+        {field.label}
+        <select required={field.required} value={String(value)} onChange={(event) => onChange(event.target.value)}>
+          {(field.options ?? []).map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label>
+      {field.label}
+      <input
+        required={field.required}
+        type={inputType}
+        min={field.type === "number" ? "1" : undefined}
+        value={String(value)}
+        onChange={(event) => onChange(field.type === "number" ? Number(event.target.value) : event.target.value)}
+        placeholder={field.label}
+      />
+    </label>
+  );
+}
+
+function createInitialForm(): Record<string, FormValue> {
+  return Object.fromEntries(appConfig.fields.map((field) => [field.name, defaultValue(field)]));
+}
+
+function defaultValue(field: FieldConfig): FormValue {
+  if (field.type === "number") {
+    return 1;
+  }
+  if (field.type === "select") {
+    return field.options?.[0] ?? "";
+  }
+  return "";
+}
+
+function formatValue(value: FormValue | undefined): string {
+  if (value === undefined || value === "") {
+    return "Not set";
+  }
+  return String(value).replace("T", " ");
+}
+
+function statusClass(status: string): string {
+  return \`status-\${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}\`;
+}
 `;
 }
 
 function stylesCss(): string {
   return `:root {
-  color: #1b1b1f;
-  background: #f6f4ef;
+  color: #1e2026;
+  background: #f7f8fa;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -355,7 +426,7 @@ textarea {
 }
 
 .overline {
-  color: #527853;
+  color: #0f766e;
   font-size: 0.8rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -371,27 +442,27 @@ p {
 }
 
 h1 {
-  font-size: clamp(2rem, 5vw, 4.5rem);
-  line-height: 0.96;
+  font-size: clamp(2rem, 5vw, 4.25rem);
+  line-height: 0.98;
   max-width: 760px;
   margin-bottom: 18px;
 }
 
 .summary {
-  max-width: 680px;
-  color: #55524c;
-  font-size: 1.08rem;
+  max-width: 720px;
+  color: #505866;
+  font-size: 1.04rem;
   line-height: 1.6;
   margin-bottom: 0;
 }
 
 .metric {
   background: #ffffff;
-  border: 1px solid #ded9cf;
+  border: 1px solid #d7dce3;
   border-radius: 8px;
   padding: 18px 22px;
-  min-width: 150px;
-  box-shadow: 0 10px 30px rgba(58, 48, 32, 0.08);
+  min-width: 160px;
+  box-shadow: 0 10px 30px rgba(31, 41, 55, 0.08);
 }
 
 .metric span {
@@ -401,7 +472,7 @@ h1 {
 }
 
 .metric small {
-  color: #68645d;
+  color: #667085;
 }
 
 .layout {
@@ -412,10 +483,10 @@ h1 {
 
 .panel {
   background: #ffffff;
-  border: 1px solid #ded9cf;
+  border: 1px solid #d7dce3;
   border-radius: 8px;
   padding: 22px;
-  box-shadow: 0 10px 30px rgba(58, 48, 32, 0.07);
+  box-shadow: 0 10px 30px rgba(31, 41, 55, 0.07);
 }
 
 .form-panel {
@@ -427,7 +498,7 @@ h1 {
 label {
   display: grid;
   gap: 7px;
-  color: #3d3a35;
+  color: #303846;
   font-size: 0.92rem;
   font-weight: 700;
 }
@@ -436,11 +507,11 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #cfc8bc;
+  border: 1px solid #cbd3df;
   border-radius: 6px;
   padding: 10px 12px;
-  background: #fffdf8;
-  color: #24221f;
+  background: #fbfcfe;
+  color: #1f2937;
 }
 
 textarea {
@@ -452,14 +523,14 @@ button {
   border: 0;
   border-radius: 6px;
   padding: 12px 14px;
-  background: #527853;
+  background: #0f766e;
   color: #ffffff;
   font-weight: 800;
   cursor: pointer;
 }
 
 button:hover {
-  background: #416642;
+  background: #115e59;
 }
 
 .queue-heading {
@@ -475,43 +546,53 @@ button:hover {
 }
 
 .queue-heading select {
-  max-width: 180px;
+  max-width: 190px;
 }
 
-.request-list {
+.record-list {
   display: grid;
   gap: 12px;
 }
 
-.request-card {
+.record-card {
   display: grid;
   grid-template-columns: 1fr 170px;
   gap: 16px;
   align-items: start;
-  border: 1px solid #e6e0d7;
+  border: 1px solid #e1e6ee;
   border-radius: 8px;
   padding: 16px;
-  background: #fffdf8;
+  background: #fbfcfe;
 }
 
-.request-title {
+.record-title {
   display: flex;
   gap: 10px;
   align-items: center;
   justify-content: space-between;
 }
 
-.request-title h3 {
+.record-title h3 {
   margin-bottom: 0;
 }
 
-.request-card p {
-  color: #5a554d;
-  margin: 8px 0 0;
+dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0 0;
 }
 
-.notes {
-  font-style: italic;
+dt {
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+dd {
+  color: #303846;
+  margin: 3px 0 0;
 }
 
 .status {
@@ -519,31 +600,41 @@ button:hover {
   padding: 5px 9px;
   font-size: 0.75rem;
   font-weight: 800;
-  background: #ece7db;
+  background: #e7edf4;
+  color: #344054;
+  white-space: nowrap;
 }
 
+.status-confirmed,
 .status-approved,
-.status-fulfilled {
-  background: #d9ead8;
-  color: #24562a;
+.status-scheduled,
+.status-completed,
+.status-returned {
+  background: #d9f7e7;
+  color: #12613a;
 }
 
-.status-rejected {
-  background: #f7d9d9;
-  color: #7b2424;
+.status-cancelled,
+.status-rejected,
+.status-overdue {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
-.status-ordered {
-  background: #dce7f7;
-  color: #274d7a;
+.status-checked-in,
+.status-checked-out,
+.status-in-progress,
+.status-seated {
+  background: #dbeafe;
+  color: #1e40af;
 }
 
 .muted {
-  color: #746f67;
+  color: #667085;
 }
 
 .error {
-  color: #9f2f2f;
+  color: #b42318;
   font-weight: 700;
   margin-bottom: 0;
 }
@@ -555,14 +646,28 @@ button:hover {
     display: grid;
   }
 
-  .request-card {
+  .record-card {
+    grid-template-columns: 1fr;
+  }
+
+  dl {
     grid-template-columns: 1fr;
   }
 }
 `;
 }
 
-function serverJs(): string {
+function serverJs(spec: DomainSpec): string {
+  const config = {
+    appName: spec.appName,
+    entitySlug: spec.primaryEntity.slug,
+    collectionKey: spec.primaryEntity.slug,
+    primaryEntityName: spec.primaryEntity.name,
+    initialStatus: spec.workflowStatuses[0] ?? "Requested",
+    fields: spec.primaryEntity.fields,
+    statuses: spec.workflowStatuses
+  };
+
   return `import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
@@ -570,10 +675,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataPath = join(__dirname, "data", "requests.json");
-const statuses = new Set(["Pending", "Approved", "Ordered", "Fulfilled", "Rejected"]);
+const config = ${JSON.stringify(config, null, 2)};
+const dataPath = join(__dirname, "data", config.entitySlug + ".json");
+const statuses = new Set(config.statuses);
 
-async function readRequests() {
+async function readRecords() {
   try {
     return JSON.parse(await readFile(dataPath, "utf8"));
   } catch {
@@ -581,9 +687,9 @@ async function readRequests() {
   }
 }
 
-async function writeRequests(requests) {
+async function writeRecords(records) {
   await mkdir(dirname(dataPath), { recursive: true });
-  await writeFile(dataPath, JSON.stringify(requests, null, 2), "utf8");
+  await writeFile(dataPath, JSON.stringify(records, null, 2), "utf8");
 }
 
 async function readJson(request) {
@@ -603,6 +709,28 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+function validate(body) {
+  for (const field of config.fields) {
+    const value = body[field.name];
+    if (field.required && (value === undefined || value === null || value === "")) {
+      return field.label + " is required.";
+    }
+    if (field.type === "number" && Number(value) <= 0) {
+      return field.label + " must be a positive number.";
+    }
+  }
+  return undefined;
+}
+
+function normalizeRecord(body) {
+  const record = {};
+  for (const field of config.fields) {
+    const value = body[field.name];
+    record[field.name] = field.type === "number" ? Number(value) : String(value ?? "");
+  }
+  return record;
+}
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1:4178");
@@ -617,37 +745,34 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/api/requests") {
-      send(response, 200, { requests: await readRequests() });
+    if (request.method === "GET" && url.pathname === "/api/" + config.entitySlug) {
+      send(response, 200, { [config.collectionKey]: await readRecords() });
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/requests") {
+    if (request.method === "POST" && url.pathname === "/api/" + config.entitySlug) {
       const body = await readJson(request);
-      if (!body.itemName || !body.requester || Number(body.quantity) <= 0) {
-        send(response, 400, { error: "Item name, requester, and positive quantity are required." });
+      const validationError = validate(body);
+      if (validationError) {
+        send(response, 400, { error: validationError });
         return;
       }
 
       const now = new Date().toISOString();
-      const requests = await readRequests();
-      requests.unshift({
+      const records = await readRecords();
+      records.unshift({
         id: randomUUID(),
-        itemName: String(body.itemName),
-        quantity: Number(body.quantity),
-        requester: String(body.requester),
-        priority: ["Low", "Normal", "High"].includes(body.priority) ? body.priority : "Normal",
-        status: "Pending",
-        notes: String(body.notes ?? ""),
+        ...normalizeRecord(body),
+        status: config.initialStatus,
         createdAt: now,
         updatedAt: now
       });
-      await writeRequests(requests);
+      await writeRecords(records);
       send(response, 201, { ok: true });
       return;
     }
 
-    const statusMatch = url.pathname.match(/^\\/api\\/requests\\/([^/]+)\\/status$/);
+    const statusMatch = url.pathname.match(new RegExp("^/api/" + config.entitySlug + "/([^/]+)/status$"));
     if (request.method === "PATCH" && statusMatch) {
       const body = await readJson(request);
       if (!statuses.has(body.status)) {
@@ -655,16 +780,16 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const requests = await readRequests();
-      const requestToUpdate = requests.find((item) => item.id === statusMatch[1]);
-      if (!requestToUpdate) {
-        send(response, 404, { error: "Request not found." });
+      const records = await readRecords();
+      const recordToUpdate = records.find((item) => item.id === statusMatch[1]);
+      if (!recordToUpdate) {
+        send(response, 404, { error: config.primaryEntityName + " not found." });
         return;
       }
 
-      requestToUpdate.status = body.status;
-      requestToUpdate.updatedAt = new Date().toISOString();
-      await writeRequests(requests);
+      recordToUpdate.status = body.status;
+      recordToUpdate.updatedAt = new Date().toISOString();
+      await writeRecords(records);
       send(response, 200, { ok: true });
       return;
     }
@@ -676,13 +801,13 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(4178, "127.0.0.1", () => {
-  console.log("Inventory request API running at http://127.0.0.1:4178");
+  console.log(config.appName ? config.appName + " API running at http://127.0.0.1:4178" : "Agentsim generated API running at http://127.0.0.1:4178");
 });
 `;
 }
 
-function appReadme(runId: string): string {
-  return `# Flower Inventory Request App
+function appReadme(runId: string, spec: DomainSpec): string {
+  return `# ${spec.appName}
 
 Generated by Agentsim run \`${basename(runId)}\`.
 
@@ -709,35 +834,27 @@ pnpm build
 
 ## Notes
 
-- The API stores demo data in \`data/requests.json\`.
+- The API stores demo data in \`data/${spec.primaryEntity.slug}.json\`.
+- The local route is \`/api/${spec.primaryEntity.slug}\`.
 - Do not expose this app publicly without adding authentication and production persistence.
 `;
 }
 
-function seedRequests() {
+function seedRecords(spec: DomainSpec): Array<Record<string, string | number>> {
   const now = new Date().toISOString();
-  return [
-    {
-      id: "seed-roses",
-      itemName: "White roses",
-      quantity: 48,
-      requester: "Mina",
-      priority: "High",
-      status: "Pending",
-      notes: "Needed for weekend wedding arrangements.",
-      createdAt: now,
-      updatedAt: now
-    },
-    {
-      id: "seed-ribbon",
-      itemName: "Sage ribbon rolls",
-      quantity: 12,
-      requester: "Jon",
-      priority: "Normal",
-      status: "Approved",
-      notes: "Low stock in wrapping station.",
-      createdAt: now,
-      updatedAt: now
-    }
-  ];
+  return spec.seedRecords.map((record, index) => ({
+    id: `seed-${index + 1}`,
+    ...record,
+    status: String(record.status ?? spec.workflowStatuses[0] ?? "Requested"),
+    createdAt: now,
+    updatedAt: now
+  }));
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

@@ -10,7 +10,7 @@ describe("run inspector TUI", () => {
   it("loads a run debug model and renders a summary screen", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-tui-test-"));
     await runDemo({
-      goal: "Build an inventory request system for a flower company",
+      goal: "Build a booking system for a barber shop",
       outputRoot,
       runId: "debug-run",
       modelProvider: new MockModelProvider()
@@ -18,6 +18,7 @@ describe("run inspector TUI", () => {
 
     const model = await loadRunDebugModel({ outputRoot, runId: "debug-run" });
     expect(model.runId).toBe("debug-run");
+    expect(model.domainSpec?.appName).toBe("Barber Booking Desk");
     expect(model.artifacts.length).toBeGreaterThan(0);
     expect(model.events.length).toBeGreaterThan(0);
 
@@ -26,6 +27,8 @@ describe("run inspector TUI", () => {
     expect(screen).toContain("Run: debug-run");
     expect(screen).toContain("[goal]");
     expect(screen).toContain("Current assignment");
+    expect(screen).toContain("Barber Booking Desk");
+    expect(screen).toContain("barber booking");
     expect(screen).toContain("Director flow");
   });
 });

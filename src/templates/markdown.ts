@@ -1,20 +1,22 @@
+import type { DomainSpec, FieldSpec } from "../domain/domain-spec.js";
+
 export function titleFromGoal(goal: string): string {
   const normalized = goal.replace(/\s+/g, " ").trim();
   const withoutBuild = normalized.replace(/^build\s+/i, "");
   return withoutBuild.charAt(0).toUpperCase() + withoutBuild.slice(1);
 }
 
-export function proposal(goal: string): string {
-  const title = titleFromGoal(goal);
+export function proposal(spec: DomainSpec): string {
+  const title = titleFromGoal(spec.sourceGoal);
   return `# Proposal: ${title}
 
 ## Objective
 
-Deliver a focused software prototype for: "${goal}".
+Deliver a focused software prototype for: "${spec.sourceGoal}".
 
 ## Proposed Solution
 
-Agentsim will produce a small inventory request system that lets staff create inventory requests, review the request queue, and update fulfillment status from an admin-oriented view.
+Agentsim will produce ${article(spec.appName)} prototype for ${spec.domain}. The app centers on ${spec.primaryEntity.pluralName.toLowerCase()} and supports ${joinHuman(spec.coreActions.map(lowerFirst))}.
 
 ## Delivery Package
 
@@ -32,69 +34,80 @@ Agentsim will produce a small inventory request system that lets staff create in
 `;
 }
 
-export function projectSummary(goal: string): string {
+export function projectSummary(spec: DomainSpec): string {
   return `# Project Summary
 
 ## Client Goal
 
-${goal}
+${spec.sourceGoal}
 
 ## MVP Outcome
 
-The MVP is a local inventory request prototype for a small flower business. It supports request creation, list review, status updates, and a basic admin workflow.
+The MVP is a local ${spec.domain} prototype named ${spec.appName}. It supports ${joinHuman(spec.coreActions.map(lowerFirst))} for ${spec.primaryEntity.pluralName.toLowerCase()}.
 
 ## Primary Users
 
-- Shop staff requesting inventory replenishment.
-- Admin or operations staff reviewing and updating requests.
+${bulletList(spec.targetUsers)}
+
+## Screens
+
+${bulletList(spec.screens.map((screen) => `${screen.name}: ${screen.purpose}`))}
 
 ## Package Notes
 
-This package is intentionally narrow. It demonstrates the core workflow without production authentication, hosted deployment, or deep ERP integration.
+This package is intentionally narrow. It demonstrates the core workflow without production authentication, hosted deployment, or deep third-party integrations.
 `;
 }
 
-export function requirements(goal: string): string {
+export function requirements(spec: DomainSpec): string {
   return `# Requirements
 
 ## Source Goal
 
-${goal}
+${spec.sourceGoal}
 
 ## Functional Requirements
 
-- Create an inventory request with item name, quantity, requester, priority, and notes.
-- View all submitted requests in a scannable list.
-- Filter or visually distinguish requests by status.
-- Update request status through Pending, Approved, Ordered, Fulfilled, and Rejected.
-- Persist request data locally for demo use.
-- Provide setup and run instructions for a developer handoff.
+${bulletList([
+    `Create ${spec.primaryEntity.name.toLowerCase()} records with ${joinHuman(spec.primaryEntity.fields.map((field) => field.label.toLowerCase()))}.`,
+    `View all submitted ${spec.primaryEntity.pluralName.toLowerCase()} in a scannable list.`,
+    `Filter or visually distinguish ${spec.primaryEntity.pluralName.toLowerCase()} by status.`,
+    `Update ${spec.primaryEntity.name.toLowerCase()} status through ${joinHuman(spec.workflowStatuses)}.`,
+    "Persist data locally for demo use.",
+    "Provide setup and run instructions for a developer handoff."
+  ])}
+
+## Required Fields
+
+${fieldList(spec.primaryEntity.fields)}
 
 ## Non-Functional Requirements
 
 - Run locally without a hosted database.
-- Keep the interface simple enough for a small business workflow.
+- Keep the interface simple enough for the target workflow.
 - Avoid storing secrets or API keys in generated files.
 - Make the delivery package understandable without reading source code first.
 `;
 }
 
-export function scope(goal: string): string {
+export function scope(spec: DomainSpec): string {
   return `# Scope
 
 ## In Scope
 
-- Local prototype for the inventory request lifecycle.
-- Staff request form.
-- Request queue and status updates.
-- Basic admin page behavior in the same app shell.
-- Local JSON-backed API and Vite React frontend.
+${bulletList([
+    `Local prototype for the ${spec.domain} lifecycle.`,
+    `${spec.screens[0]?.name ?? `New ${spec.primaryEntity.name}`} form.`,
+    `${spec.primaryEntity.name} list and status updates.`,
+    `${spec.screens.at(-1)?.name ?? "Admin"} behavior in the same app shell.`,
+    "Local JSON-backed API and Vite React frontend."
+  ])}
 
 ## Out of Scope
 
 - User authentication and permissions.
 - Production database migrations.
-- Supplier ordering integrations.
+- External integration automation.
 - Email/SMS notifications.
 - Hosted deployment automation.
 
@@ -104,83 +117,83 @@ The implementation optimizes for a clear freelance handoff package, not a produc
 `;
 }
 
-export function assumptions(): string {
+export function assumptions(spec: DomainSpec): string {
   return `# Assumptions
 
-- The client needs a workflow prototype before committing to production integrations.
-- Local persistence is acceptable for MVP demonstration.
-- Staff and admin users can share one local app for the first review.
-- Inventory requests are simple records, not full purchase orders.
-- Status history can be added later if the client validates the workflow.
+${bulletList([
+    "The client needs a workflow prototype before committing to production integrations.",
+    "Local persistence is acceptable for MVP demonstration.",
+    "Target users can share one local app for the first review.",
+    ...spec.assumptions
+  ])}
 `;
 }
 
-export function timeline(): string {
+export function timeline(spec: DomainSpec): string {
   return `# Timeline
 
 ## MVP Delivery Plan
 
 | Phase | Work | Estimated Duration |
 | --- | --- | --- |
-| Discovery | Confirm inventory request fields and statuses | 0.5 day |
+| Discovery | Confirm fields, workflow statuses, and user roles for ${spec.domain} | 0.5 day |
 | Prototype Build | Implement form, list, status update, and local API | 1-2 days |
 | Review | Run QA, revise rough edges, document known issues | 0.5 day |
 | Handoff | Package README, user guide, and technical notes | 0.5 day |
 
 ## Recommended Next Step
 
-Review the prototype with one staff member and one admin before adding integrations.
+Review the prototype with representative users before adding integrations.
 `;
 }
 
-export function risks(): string {
+export function risks(spec: DomainSpec): string {
   return `# Risks
 
-- The real workflow may require approvals, budgets, or supplier-specific fields not captured in the MVP.
-- Local JSON persistence is not safe for production multi-user use.
-- Without authentication, the prototype should not be exposed publicly.
-- Status options may need adjustment after client review.
-- Production deployment will require a database, access control, backups, and monitoring.
+${bulletList([
+    `The real ${spec.domain} workflow may require approvals, permissions, or domain-specific fields not captured in the MVP.`,
+    "Local JSON persistence is not safe for production multi-user use.",
+    "Without authentication, the prototype should not be exposed publicly.",
+    "Status options may need adjustment after client review.",
+    "Production deployment will require a database, access control, backups, and monitoring.",
+    ...spec.risks
+  ])}
 `;
 }
 
-export function architecture(): string {
+export function architecture(spec: DomainSpec): string {
   return `# Architecture
 
 ## Overview
 
-The prototype uses a Vite React frontend and a lightweight Node HTTP API. The API stores requests in a local JSON file so the app can run without external infrastructure.
+The prototype uses a Vite React frontend and a lightweight Node HTTP API. The API stores ${spec.primaryEntity.pluralName.toLowerCase()} in a local JSON file so the app can run without external infrastructure.
 
 ## Components
 
-- React UI for request creation, queue review, and status updates.
-- Node API with endpoints for listing, creating, and updating requests.
+- React UI for ${spec.primaryEntity.name.toLowerCase()} creation, list review, and status updates.
+- Node API with endpoints for listing, creating, and updating ${spec.primaryEntity.pluralName.toLowerCase()}.
 - Local JSON data file for persistence.
 
 ## Data Flow
 
-1. Staff submits an inventory request in the browser.
-2. The React app sends the request to the local API.
-3. The API validates required fields and writes the request to JSON storage.
-4. Admin users update request status from the queue.
+1. A target user submits ${article(spec.primaryEntity.name.toLowerCase())} in the browser.
+2. The React app sends the record to the local API.
+3. The API validates required fields and writes the record to JSON storage.
+4. Admin users update workflow status from the queue.
 5. The UI refreshes the queue after each mutation.
 `;
 }
 
-export function databaseSchema(): string {
+export function databaseSchema(spec: DomainSpec): string {
   return `# Database Schema
 
 ## Local JSON Record Shape
 
 \`\`\`ts
-interface InventoryRequest {
+interface ${typeName(spec.primaryEntity.name)} {
   id: string;
-  itemName: string;
-  quantity: number;
-  requester: string;
-  priority: "Low" | "Normal" | "High";
-  status: "Pending" | "Approved" | "Ordered" | "Fulfilled" | "Rejected";
-  notes: string;
+${spec.primaryEntity.fields.map(fieldTypeLine).join("\n")}
+  status: ${unionType(spec.workflowStatuses)};
   createdAt: string;
   updatedAt: string;
 }
@@ -188,38 +201,41 @@ interface InventoryRequest {
 
 ## Production Direction
 
-Move this record into a relational table with indexes on \`status\`, \`priority\`, and \`createdAt\` once the workflow is validated.
+Move this record into a relational table with indexes on \`status\`, \`createdAt\`, and the most common filtering fields once the workflow is validated.
 `;
 }
 
-export function apiPlan(): string {
+export function apiPlan(spec: DomainSpec): string {
+  const requiredFields = spec.primaryEntity.fields.filter((field) => field.required).map((field) => `\`${field.name}\``);
   return `# API Plan
 
 ## Endpoints
 
-- \`GET /api/requests\` returns all inventory requests.
-- \`POST /api/requests\` creates a request.
-- \`PATCH /api/requests/:id/status\` updates a request status.
+- \`GET /api/${spec.primaryEntity.slug}\` returns all ${spec.primaryEntity.pluralName.toLowerCase()}.
+- \`POST /api/${spec.primaryEntity.slug}\` creates ${article(spec.primaryEntity.name.toLowerCase())}.
+- \`PATCH /api/${spec.primaryEntity.slug}/:id/status\` updates ${article(spec.primaryEntity.name.toLowerCase())} status.
 - \`GET /api/health\` verifies the local API is running.
 
 ## Validation
 
-- \`itemName\`, \`requester\`, and positive \`quantity\` are required.
+- Required fields: ${joinHuman(requiredFields)}.
+- Positive numeric values are required for number fields.
 - Unknown statuses are rejected.
-- Notes are optional.
 `;
 }
 
-export function taskBreakdown(): string {
+export function taskBreakdown(spec: DomainSpec): string {
   return `# Task Breakdown
 
-- Define request record fields and status values.
-- Build local API with JSON persistence.
-- Build React request form and queue.
-- Add status update controls.
-- Add empty, loading, and error states.
-- Write setup and run instructions.
-- Run package QA and document known issues.
+${bulletList([
+    `Define ${spec.primaryEntity.name.toLowerCase()} fields and status values.`,
+    "Build local API with JSON persistence.",
+    `Build React ${spec.primaryEntity.name.toLowerCase()} form and list view.`,
+    "Add status update controls.",
+    "Add empty, loading, and error states.",
+    "Write setup and run instructions.",
+    "Run package QA and document known issues."
+  ])}
 `;
 }
 
@@ -243,13 +259,13 @@ The package is suitable for a first client review demo. Production hardening is 
 `;
 }
 
-export function codeReview(): string {
+export function codeReview(spec: DomainSpec): string {
   return `# Code Review
 
 ## Findings
 
 - The generated app uses a deliberately small local API to keep the handoff understandable.
-- Request status values are centralized in the UI and API validation path.
+- ${spec.primaryEntity.name} status values are centralized in the UI and API validation path.
 - Local JSON persistence is appropriate for demo use but should be replaced before production.
 - No API keys or model credentials are written into the generated app.
 
@@ -261,7 +277,7 @@ export function codeReview(): string {
 `;
 }
 
-export function knownIssues(appValidationFailed: boolean): string {
+export function knownIssues(spec: DomainSpec, appValidationFailed: boolean): string {
   const validationNote = appValidationFailed
     ? "- Generated app validation reported issues. See `qa-report.md` for details."
     : "- No blocking package-generation issues were found during MVP validation.";
@@ -272,16 +288,16 @@ ${validationNote}
 - The prototype has no login or role separation.
 - Data is stored in a local JSON file, not a production database.
 - The UI is optimized for workflow review, not polished brand presentation.
-- There is no supplier integration or notification workflow yet.
+- ${spec.primaryEntity.name} history and notifications are not implemented yet.
 `;
 }
 
-export function handoffGuide(goal: string): string {
+export function handoffGuide(spec: DomainSpec): string {
   return `# Handoff Guide
 
 ## What Was Delivered
 
-A complete MVP package for: ${goal}
+A complete MVP package for: ${spec.sourceGoal}
 
 ## How To Review
 
@@ -292,10 +308,51 @@ A complete MVP package for: ${goal}
 
 ## Recommended Client Questions
 
-- Are these the right request fields?
+- Are these the right ${spec.primaryEntity.name.toLowerCase()} fields?
 - Are these the right status values?
-- Who should be able to approve or reject requests?
-- What supplier or inventory system should this integrate with next?
+- Who should be able to change workflow status?
+- What systems should this integrate with next?
 `;
 }
 
+function bulletList(items: string[]): string {
+  return items.map((item) => `- ${item}`).join("\n");
+}
+
+function fieldList(fields: FieldSpec[]): string {
+  return bulletList(fields.map((field) => `${field.label} (${field.type}${field.required ? ", required" : ", optional"})`));
+}
+
+function fieldTypeLine(field: FieldSpec): string {
+  const type = field.type === "number" ? "number" : field.options ? unionType(field.options) : "string";
+  return `  ${field.name}${field.required ? "" : "?"}: ${type};`;
+}
+
+function unionType(values: string[]): string {
+  return values.map((value) => JSON.stringify(value)).join(" | ");
+}
+
+function typeName(value: string): string {
+  return value.replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+}
+
+function article(value: string): string {
+  return /^[aeiou]/i.test(value) ? `an ${value}` : `a ${value}`;
+}
+
+function lowerFirst(value: string): string {
+  return value.charAt(0).toLowerCase() + value.slice(1);
+}
+
+function joinHuman(values: string[]): string {
+  if (values.length === 0) {
+    return "none";
+  }
+  if (values.length === 1) {
+    return values[0] ?? "";
+  }
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}

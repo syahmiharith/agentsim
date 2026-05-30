@@ -35,6 +35,9 @@ interface EventDebug {
     modelMode?: string;
     provider?: string;
     finalPackageDir?: string;
+    appName?: string;
+    domain?: string;
+    primaryEntity?: string;
   };
 }
 
@@ -52,11 +55,24 @@ interface ApprovalDebug {
   approver: string;
 }
 
+interface DomainSpecDebug {
+  appName: string;
+  domain: string;
+  primaryEntity: {
+    name: string;
+    pluralName: string;
+    slug: string;
+  };
+  targetUsers: string[];
+  workflowStatuses: string[];
+}
+
 export interface RunDebugModel {
   runId: string;
   goal?: string;
   modelMode?: string;
   provider?: string;
+  domainSpec?: DomainSpecDebug;
   runRoot: string;
   finalPackageDir: string;
   artifacts: ArtifactDebug[];
@@ -98,6 +114,7 @@ export async function loadRunDebugModel(options: RunInspectorOptions): Promise<R
   const artifactLineage = await readJsonFile<{ artifacts?: RawArtifactDebug[] }>(join(traceDir, "artifact-lineage.json"), { artifacts: [] });
   const decisions = await readJsonFile<{ decisions?: DecisionDebug[] }>(join(traceDir, "decisions.json"), { decisions: [] });
   const approvals = await readJsonFile<{ approvals?: ApprovalDebug[] }>(join(traceDir, "approvals.json"), { approvals: [] });
+  const domainSpec = await readJsonFile<DomainSpecDebug | undefined>(join(traceDir, "domain-spec.json"), undefined);
   const events = await readEvents(join(traceDir, "events.jsonl"));
   const runStarted = events.find((event) => event.name === "run.started");
 
@@ -106,6 +123,7 @@ export async function loadRunDebugModel(options: RunInspectorOptions): Promise<R
     goal: runStarted?.data?.goal,
     modelMode: runStarted?.data?.modelMode,
     provider: runStarted?.data?.provider,
+    domainSpec,
     runRoot,
     finalPackageDir,
     artifacts: (artifactLineage.artifacts ?? []).map(normalizeArtifact),
@@ -208,8 +226,12 @@ function renderTab(model: RunDebugModel, tab: DashboardTab, selectedIndex: numbe
     return [
       "Current assignment",
       `Goal: ${model.goal ?? "unknown goal"}`,
+      `App: ${model.domainSpec?.appName ?? "unknown app"}`,
+      `Domain: ${model.domainSpec?.domain ?? "unknown domain"}`,
+      `Primary entity: ${model.domainSpec?.primaryEntity.name ?? "unknown entity"}`,
       `Model mode: ${model.modelMode ?? "unknown"} (${model.provider ?? "unknown provider"})`,
       `Final package: ${model.finalPackageDir}`,
+      `Statuses: ${model.domainSpec?.workflowStatuses.join(", ") ?? "unknown"}`,
       "",
       "Run health",
       `Artifacts ready: ${model.artifacts.filter((artifact) => artifact.status === "approved" || artifact.status === "exported").length}/${model.artifacts.length}`,

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { FileArtifactStore } from "./core/artifacts.js";
 import { JsonlEventStore } from "./core/events.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
+import { inferDomainSpec } from "./domain/mock-domain-spec.js";
 import { getAgent } from "./agents/agents.js";
 import {
   apiPlan,
@@ -22,6 +23,7 @@ import {
   timeline
 } from "./templates/markdown.js";
 import { writeGeneratedApp } from "./templates/app.js";
+import type { DomainSpec } from "./domain/domain-spec.js";
 import type { Approval, Artifact, Decision, ModelProvider, TaskRun } from "./types.js";
 
 export interface RunDemoOptions {
@@ -36,6 +38,7 @@ export interface RunDemoResult {
   finalPackageDir: string;
   artifacts: Artifact[];
   decisions: Decision[];
+  domainSpec: DomainSpec;
 }
 
 export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
@@ -46,6 +49,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
   const eventStore = new JsonlEventStore(runId, join(workspace.finalPackageDir, "trace", "events.jsonl"));
   const artifactStore = new FileArtifactStore(workspace);
   const decisions: Decision[] = [];
+  const domainSpec = inferDomainSpec(options.goal);
   const taskRun: TaskRun = {
     id: runId,
     goal: options.goal,
@@ -60,7 +64,24 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     level: "info",
     name: "run.started",
     message: `Started Agentsim demo run ${runId}.`,
-    data: { goal: options.goal, modelMode: options.modelProvider.mode, provider: options.modelProvider.name }
+    data: {
+      goal: options.goal,
+      modelMode: options.modelProvider.mode,
+      provider: options.modelProvider.name,
+      appName: domainSpec.appName,
+      domain: domainSpec.domain,
+      primaryEntity: domainSpec.primaryEntity.name
+    }
+  });
+
+  decisions.push({
+    id: "domain-spec",
+    runId,
+    madeAt: new Date().toISOString(),
+    madeBy: "system",
+    title: "Domain inference",
+    rationale: `Inferred ${domainSpec.domain} from the user goal and selected ${domainSpec.primaryEntity.name} as the primary workflow entity.`,
+    selectedOption: domainSpec.appName
   });
 
   decisions.push({
@@ -112,7 +133,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "proposal",
       ownerAgentId: "client-intake",
-      content: proposal(options.goal),
+      content: proposal(domainSpec),
       workspaceRelativePath: "artifacts/client/proposal.md",
       finalPackagePath: "client/proposal.md"
     });
@@ -122,7 +143,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "project-summary",
       ownerAgentId: "client-intake",
-      content: projectSummary(options.goal),
+      content: projectSummary(domainSpec),
       workspaceRelativePath: "artifacts/client/project-summary.md",
       finalPackagePath: "client/project-summary.md",
       inputArtifactIds: [proposalArtifact.id]
@@ -135,7 +156,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "requirements",
       ownerAgentId: "scope-pm",
-      content: requirements(options.goal),
+      content: requirements(domainSpec),
       workspaceRelativePath: "artifacts/planning/requirements.md",
       finalPackagePath: "planning/requirements.md",
       inputArtifactIds: planningInputs
@@ -146,7 +167,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "scope",
       ownerAgentId: "scope-pm",
-      content: scope(options.goal),
+      content: scope(domainSpec),
       workspaceRelativePath: "artifacts/planning/scope.md",
       finalPackagePath: "planning/scope.md",
       inputArtifactIds: [requirementsArtifact.id]
@@ -157,7 +178,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "assumptions",
       ownerAgentId: "scope-pm",
-      content: assumptions(),
+      content: assumptions(domainSpec),
       workspaceRelativePath: "artifacts/planning/assumptions.md",
       finalPackagePath: "planning/assumptions.md",
       inputArtifactIds: [scopeArtifact.id]
@@ -168,7 +189,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "timeline",
       ownerAgentId: "scope-pm",
-      content: timeline(),
+      content: timeline(domainSpec),
       workspaceRelativePath: "artifacts/planning/timeline.md",
       finalPackagePath: "planning/timeline.md",
       inputArtifactIds: [scopeArtifact.id]
@@ -179,7 +200,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "risks",
       ownerAgentId: "scope-pm",
-      content: risks(),
+      content: risks(domainSpec),
       workspaceRelativePath: "artifacts/planning/risks.md",
       finalPackagePath: "planning/risks.md",
       inputArtifactIds: [scopeArtifact.id, assumptionsArtifact.id]
@@ -191,7 +212,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "architecture",
       ownerAgentId: "software-architect",
-      content: architecture(),
+      content: architecture(domainSpec),
       workspaceRelativePath: "artifacts/technical/architecture.md",
       finalPackagePath: "technical/architecture.md",
       inputArtifactIds: [requirementsArtifact.id, scopeArtifact.id]
@@ -202,7 +223,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "database-schema",
       ownerAgentId: "software-architect",
-      content: databaseSchema(),
+      content: databaseSchema(domainSpec),
       workspaceRelativePath: "artifacts/technical/database-schema.md",
       finalPackagePath: "technical/database-schema.md",
       inputArtifactIds: [architectureArtifact.id]
@@ -213,7 +234,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "api-plan",
       ownerAgentId: "software-architect",
-      content: apiPlan(),
+      content: apiPlan(domainSpec),
       workspaceRelativePath: "artifacts/technical/api-plan.md",
       finalPackagePath: "technical/api-plan.md",
       inputArtifactIds: [architectureArtifact.id, schemaArtifact.id]
@@ -224,7 +245,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "task-breakdown",
       ownerAgentId: "scope-pm",
-      content: taskBreakdown(),
+      content: taskBreakdown(domainSpec),
       workspaceRelativePath: "artifacts/planning/task-breakdown.md",
       finalPackagePath: "planning/task-breakdown.md",
       inputArtifactIds: [requirementsArtifact.id, architectureArtifact.id, apiArtifact.id]
@@ -235,9 +256,10 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       level: "info",
       name: "app.generation.started",
       agentId: "builder",
-      message: "Generating runnable app prototype."
+      message: "Generating runnable app prototype.",
+      data: { appName: domainSpec.appName, entitySlug: domainSpec.primaryEntity.slug }
     });
-    await writeGeneratedApp(workspace, driver);
+    await writeGeneratedApp(workspace, driver, domainSpec);
     await driver.copyDirectory(join(workspace.workspaceDir, "app"), join(workspace.finalPackageDir, "app"));
     const appArtifact = await artifactStore.createMarkdown({
       type: "app",
@@ -281,7 +303,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "code-review",
       ownerAgentId: "reviewer-qa",
-      content: codeReview(),
+      content: codeReview(domainSpec),
       workspaceRelativePath: "artifacts/review/code-review.md",
       finalPackagePath: "review/code-review.md",
       inputArtifactIds: [appArtifact.id],
@@ -293,7 +315,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "known-issues",
       ownerAgentId: "reviewer-qa",
-      content: knownIssues(appValidationFailed),
+      content: knownIssues(domainSpec, appValidationFailed),
       workspaceRelativePath: "artifacts/review/known-issues.md",
       finalPackagePath: "review/known-issues.md",
       inputArtifactIds: [qaArtifact.id, codeReviewArtifact.id],
@@ -305,7 +327,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       goal: options.goal,
       type: "handoff-guide",
       ownerAgentId: "delivery",
-      content: handoffGuide(options.goal),
+      content: handoffGuide(domainSpec),
       workspaceRelativePath: "artifacts/client/handoff-guide.md",
       finalPackagePath: "client/handoff-guide.md",
       inputArtifactIds: [qaArtifact.id, knownIssuesArtifact.id, risksArtifact.id]
@@ -341,6 +363,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       notes: "Auto-approved by the v0 demo pipeline."
     }));
 
+    await writeFile(join(workspace.finalPackageDir, "trace", "domain-spec.json"), JSON.stringify(domainSpec, null, 2), "utf8");
     await writeFile(join(workspace.finalPackageDir, "trace", "decisions.json"), JSON.stringify({ decisions }, null, 2), "utf8");
     await writeFile(join(workspace.finalPackageDir, "trace", "approvals.json"), JSON.stringify({ approvals }, null, 2), "utf8");
     await artifactStore.exportLineage(join(workspace.finalPackageDir, "trace", "artifact-lineage.json"));
@@ -361,7 +384,8 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       taskRun,
       finalPackageDir: workspace.finalPackageDir,
       artifacts: artifactStore.list(),
-      decisions
+      decisions,
+      domainSpec
     };
   } catch (error) {
     taskRun.status = "failed";
