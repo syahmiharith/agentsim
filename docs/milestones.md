@@ -42,8 +42,9 @@ pnpm agentsim run "Build an inventory request system for a flower company" --moc
 Current capabilities:
 
 - TypeScript CLI and local filesystem workspace.
-- Core contracts for `Agent`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
-- Mock and OpenAI-compatible model provider boundary.
+- Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Artifact`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
+- Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
+- Mock and Chat Completions-compatible model provider boundary.
 - Artifact lineage, decision logs, approval records, and event trace.
 - Generated runnable Vite React app package with local API and JSON persistence.
 - Final package validation and `run-summary.json`.
@@ -58,6 +59,7 @@ Build:
 
 - Keep `agentsim run` as the canonical command while preserving `pnpm demo` as a local shortcut.
 - Keep `Organization`, `Project`, and `DomainPack` as thin core contracts.
+- Keep `AgentStep` focused on artifact production instead of generic agent chat.
 - Keep the software-freelance workflow represented by `software-freelance-pack`.
 - Strengthen required artifact validation for final-package completeness.
 - Keep `run-summary.json` accurate with run status, package path, artifact count, validation result, and failures.

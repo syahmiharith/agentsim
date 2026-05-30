@@ -31,7 +31,7 @@ Current capability:
 * run a local CLI workflow from a high-level client request
 * generate planning, technical, review, client handoff, trace, and app prototype files
 * run in deterministic mock mode without provider keys
-* use an OpenAI-compatible provider in live mode when configured
+* use a model-agnostic Chat Completions-compatible provider in live mode when configured
 
 Current limitations:
 
@@ -130,8 +130,8 @@ Agentsim currently has a CLI-based proof of concept:
 * TypeScript CLI
 * local filesystem workspace
 * mock mode for deterministic no-key runs
-* OpenAI-compatible live model provider mode
-* AI-assisted roles for intake, planning, architecture, implementation, QA, and delivery
+* model-agnostic live provider mode through the Chat Completions-compatible `ModelProvider` boundary
+* artifact-producing agent steps for intake, planning, architecture, implementation, QA, and delivery
 * durable artifact generation
 * artifact lineage, decision logs, approval records, and event traces
 * runnable generated app package for the first software-freelance workflow
@@ -161,16 +161,21 @@ Use mock mode explicitly for deterministic no-key runs:
 pnpm demo "Build an inventory request system for a flower company" --mock
 ```
 
-Use live mode with an OpenAI-compatible provider:
+Use live mode with any Chat Completions-compatible provider:
 
 ```bash
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4.1-mini
+AGENTSIM_MODEL_PROVIDER=chat-completions-compatible
+AGENTSIM_MODEL_API_KEY=...
+AGENTSIM_MODEL_BASE_URL=https://api.openai.com/v1
+AGENTSIM_MODEL_NAME=gpt-4.1-mini
 pnpm demo "Build an inventory request system for a flower company" --live
 ```
 
+Existing `OPENAI_*` and `OPENAI_COMPATIBLE_*` environment variables are still supported as aliases.
+
 If no live key is configured and `--live` is not passed, Agentsim falls back to mock mode.
+
+Agentsim owns the runtime orchestration, artifact graph, review state, event trace, and final package validation. Live providers only implement the small `ModelProvider.generate()` boundary.
 
 ## Development
 
@@ -185,7 +190,7 @@ Useful entry points:
 * `src/cli.ts` - CLI command surface
 * `src/workflow.ts` - current end-to-end workflow
 * `src/types.ts` - core contracts
-* `src/agents/agents.ts` - AI-assisted role definitions
+* `src/agents/` - role definitions and artifact-producing step registry
 * `src/core/` - artifacts, events, hashing, redaction, and workspace behavior
 * `src/providers/` - model provider boundary
 * `src/templates/` - generated delivery package templates
@@ -196,6 +201,7 @@ Useful entry points:
 Agentsim is currently built around these concepts:
 
 * `Agent`
+* `AgentStep`
 * `TaskRun`
 * `Artifact`
 * `Workspace`

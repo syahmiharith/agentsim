@@ -27,14 +27,14 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, and `tui` command parsing and provider selection. |
 | `src/workflow.ts` | Coordinates the current end-to-end run from goal to final package. |
 | `src/types.ts` | Holds core contracts used across the CLI, workflow, artifacts, events, and providers. |
-| `src/agents/agents.ts` | Defines the current software-freelance role set. |
+| `src/agents/` | Defines the current software-freelance role set and artifact-producing step registry. |
 | `src/domain/` | Defines the software-freelance domain pack and deterministic domain-spec inference. |
 | `src/templates/` | Generates Markdown artifacts and the runnable app prototype. |
 | `src/core/artifacts.ts` | Writes artifacts, content hashes, status metadata, and lineage. |
 | `src/core/events.ts` | Writes redacted JSONL event traces. |
 | `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, and lineage. |
 | `src/core/workspace.ts` | Provides the local filesystem workspace driver. |
-| `src/providers/` | Provides mock and OpenAI-compatible model providers. |
+| `src/providers/` | Provides mock and Chat Completions-compatible model providers. |
 | `src/tui/run-inspector.ts` | Inspects completed runs from local outputs. |
 | `tests/` | Captures executable expectations for CLI parsing, workflow output, domain packs, validation, hashing, redaction, and TUI inspection. |
 
@@ -44,6 +44,7 @@ The public architecture is built around these contracts:
 
 ```text
 Agent
+AgentStep
 TaskRun
 Artifact
 Workspace
@@ -77,7 +78,7 @@ pnpm agentsim tui <runId>
 Provider selection is CLI-level:
 
 - `--mock` uses deterministic mock mode.
-- `--live` requires configured OpenAI-compatible provider settings.
+- `--live` requires configured Chat Completions-compatible provider settings.
 - no flag uses auto mode, falling back to mock mode when no live key is configured.
 
 The CLI should remain a thin adapter. Product behavior belongs in workflow, domain, core, template, and provider modules.
@@ -92,6 +93,7 @@ Main responsibilities:
 - create event and artifact stores
 - infer a `DomainSpec` through the domain pack
 - record provider and domain decisions
+- execute the artifact-producing agent step registry
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
 - validate package completeness
@@ -156,14 +158,25 @@ It supports:
 
 ## Provider Layer
 
-Agentsim is BYOK. Model providers are replaceable behind `ModelProvider`.
+Agentsim is BYOK and model-agnostic at runtime. Model providers are replaceable behind `ModelProvider`.
 
 Current providers:
 
 - mock provider for deterministic no-key tests and demos
-- OpenAI-compatible provider for live local runs
+- Chat Completions-compatible HTTP provider for live local runs
 
-Provider implementations must not leak secrets into prompts, events, artifacts, logs, errors, or generated files.
+Live provider configuration is provider-neutral:
+
+```text
+AGENTSIM_MODEL_PROVIDER=chat-completions-compatible
+AGENTSIM_MODEL_API_KEY=...
+AGENTSIM_MODEL_BASE_URL=...
+AGENTSIM_MODEL_NAME=...
+```
+
+Provider-specific `OPENAI_*` and `OPENAI_COMPATIBLE_*` environment variables are backward-compatible aliases, not the architecture boundary.
+
+Provider implementations must not leak secrets into prompts, events, artifacts, logs, errors, or generated files. The workflow, artifact graph, review state, event trace, and final package validation stay inside Agentsim rather than a provider SDK.
 
 ## Final Package Shape
 

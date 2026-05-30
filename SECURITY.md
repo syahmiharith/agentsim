@@ -50,6 +50,17 @@ Agentsim is a BYOK control plane. Contributions must not leak API keys, credenti
 - private reports
 - public documentation
 
+Live model configuration should use provider-neutral BYOK variables where possible:
+
+```text
+AGENTSIM_MODEL_PROVIDER
+AGENTSIM_MODEL_API_KEY
+AGENTSIM_MODEL_BASE_URL
+AGENTSIM_MODEL_NAME
+```
+
+Provider-specific aliases may exist for local convenience, but provider adapters must stay behind `ModelProvider` and must not make the Agentsim runtime depend on a provider SDK.
+
 When reporting a bug, redact secrets and replace real client data with representative examples.
 
 ## Prompt and Generated Artifact Risks

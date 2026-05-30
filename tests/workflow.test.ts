@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { MockModelProvider } from "../src/providers/mock-model-provider.js";
+import type { ModelProvider, ModelRequest, ModelResponse } from "../src/types.js";
 import { runDemo } from "../src/workflow.js";
 
 describe("demo workflow", () => {
@@ -53,9 +54,12 @@ describe("demo workflow", () => {
 
     const lineage = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "artifact-lineage.json"), "utf8"));
     expect(lineage.artifacts.every((artifact: { contentHash?: string }) => Boolean(artifact.contentHash))).toBe(true);
+    expect(lineage.artifacts.find((artifact: { type: string }) => artifact.type === "app").reviewStatus).toBe("passed");
+    expect(lineage.artifacts.every((artifact: { approvalStatus: string; reviewStatus: string }) => artifact.approvalStatus !== "approved" || artifact.reviewStatus !== "pending")).toBe(true);
 
     const events = await readFile(join(result.finalPackageDir, "trace", "events.jsonl"), "utf8");
     expect(events).toContain("run.completed");
+    expect(events).toContain("agent.step.started");
 
     const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
     expect(appReadme).toContain("pnpm dev:api");
@@ -130,4 +134,74 @@ describe("demo workflow", () => {
     expect(readme).toContain("pnpm dev:api");
     expect(readme).toContain("pnpm dev:web");
   });
+
+  it("uses the live model provider for artifact-producing markdown steps", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-live-step-test-"));
+    const provider = new RecordingLiveProvider();
+    const result = await runDemo({
+      goal: "Build an inventory request system for a flower company",
+      outputRoot,
+      runId: "live-step-run",
+      modelProvider: provider
+    });
+
+    expect(result.taskRun.status).toBe("COMPLETED");
+    expect(provider.requests.map((request) => request.purpose)).toEqual(expect.arrayContaining([
+      "run-brief",
+      "agent-step:client-proposal",
+      "agent-step:planning-requirements",
+      "agent-step:review-qa-report",
+      "agent-step:delivery-user-guide"
+    ]));
+    expect(provider.requests).toHaveLength(17);
+
+    const requirements = await readFile(join(result.finalPackageDir, "planning", "requirements.md"), "utf8");
+    expect(requirements).toContain("Live artifact for agent-step:planning-requirements");
+
+    const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
+    expect(appReadme).toContain("pnpm dev:api");
+  });
+
+  it("redacts secrets from workflow state, traces, artifacts, and provider prompts", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-secret-test-"));
+    const provider = new RecordingLiveProvider();
+    const secret = "sk-testsecret1234567890";
+    const result = await runDemo({
+      goal: `Build an inventory request system for ${secret}`,
+      outputRoot,
+      runId: "secret-redaction-run",
+      modelProvider: provider
+    });
+
+    expect(result.taskRun.goal).not.toContain(secret);
+    expect(provider.requests.some((request) => request.prompt.includes(secret) || request.system.includes(secret))).toBe(false);
+
+    const files = await listFiles(result.finalPackageDir);
+    const contents = await Promise.all(files.map((file) => readFile(file, "utf8")));
+    expect(contents.join("\n")).not.toContain(secret);
+    expect(contents.join("\n")).toContain("[REDACTED]");
+  });
 });
+
+class RecordingLiveProvider implements ModelProvider {
+  readonly mode = "live";
+  readonly name = "recording-live";
+  readonly requests: ModelRequest[] = [];
+
+  async generate(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request);
+    return {
+      content: `# Live artifact for ${request.purpose}\n\nGenerated from ${request.prompt.length} prompt characters.`,
+      model: "recording-model"
+    };
+  }
+}
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? listFiles(path) : [path];
+  }));
+  return files.flat();
+}

@@ -3,15 +3,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { validateFinalPackage } from "../src/core/final-package-validation.js";
+import { sha256 } from "../src/core/hash.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import type { Artifact } from "../src/types.js";
 
 describe("validateFinalPackage", () => {
   it("passes a complete package manifest", async () => {
     const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
     const result = await validateFinalPackage({
       finalPackageDir,
-      artifacts: createArtifacts(),
+      artifacts,
       domainPack: softwareFreelancePack
     });
 
@@ -22,10 +24,11 @@ describe("validateFinalPackage", () => {
   it("reports missing required final-package files", async () => {
     const finalPackageDir = await createCompletePackage();
     await rm(join(finalPackageDir, "client", "user-guide.md"));
+    const artifacts = await createArtifacts(finalPackageDir);
 
     const result = await validateFinalPackage({
       finalPackageDir,
-      artifacts: createArtifacts(),
+      artifacts,
       domainPack: softwareFreelancePack
     });
 
@@ -36,10 +39,11 @@ describe("validateFinalPackage", () => {
   it("reports missing required trace files", async () => {
     const finalPackageDir = await createCompletePackage();
     await rm(join(finalPackageDir, "trace", "decisions.json"));
+    const artifacts = await createArtifacts(finalPackageDir);
 
     const result = await validateFinalPackage({
       finalPackageDir,
-      artifacts: createArtifacts(),
+      artifacts,
       domainPack: softwareFreelancePack
     });
 
@@ -49,7 +53,7 @@ describe("validateFinalPackage", () => {
 
   it("reports invalid artifact lineage", async () => {
     const finalPackageDir = await createCompletePackage();
-    const artifacts = createArtifacts();
+    const artifacts = await createArtifacts(finalPackageDir);
     artifacts[0] = { ...artifacts[0], lineage: undefined as unknown as Artifact["lineage"] };
 
     const result = await validateFinalPackage({
@@ -60,6 +64,58 @@ describe("validateFinalPackage", () => {
 
     expect(result.ok).toBe(false);
     expect(result.failures).toContain(`Artifact ${artifacts[0].type} is missing lineage inputArtifactIds`);
+  });
+
+  it("requires review-required artifacts to pass review before final completion", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const appIndex = artifacts.findIndex((artifact) => artifact.type === "app");
+    artifacts[appIndex] = { ...artifacts[appIndex], reviewStatus: "pending", approvalStatus: "approved" };
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Review-required artifact app must pass review before final completion");
+    expect(result.failures).toContain("Artifact app cannot be approved while review is pending");
+  });
+
+  it("rejects dangling lineage references and duplicate final package paths", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    artifacts[1] = {
+      ...artifacts[1],
+      finalPackagePath: artifacts[0].finalPackagePath,
+      lineage: { inputArtifactIds: ["missing-artifact"] }
+    };
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain(`Duplicate final package path: ${artifacts[0].finalPackagePath}`);
+    expect(result.failures).toContain(`Artifact ${artifacts[1].type} references unknown input artifact missing-artifact`);
+  });
+
+  it("rejects stale artifact content hashes", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    artifacts[0] = { ...artifacts[0], contentHash: sha256("old content") };
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain(`Artifact ${artifacts[0].type} contentHash does not match workspace content`);
   });
 });
 
@@ -79,21 +135,32 @@ async function createCompletePackage(): Promise<string> {
   return finalPackageDir;
 }
 
-function createArtifacts(): Artifact[] {
-  return softwareFreelancePack.artifactManifest
+async function createArtifacts(finalPackageDir: string): Promise<Artifact[]> {
+  const artifacts: Artifact[] = [];
+
+  for (const [index, item] of softwareFreelancePack.artifactManifest
     .filter((item) => item.required)
-    .map((item, index) => ({
+    .entries()) {
+    const content = `${item.type} content`;
+    const workspacePath = join(finalPackageDir, "..", "workspace-artifacts", `${item.type}.md`);
+    await mkdir(dirname(workspacePath), { recursive: true });
+    await writeFile(workspacePath, content, "utf8");
+
+    artifacts.push({
       id: `artifact-${index}`,
       type: item.type,
       ownerAgentId: item.ownerAgentId,
       status: item.type === "app" ? "exported" : "approved",
-      workspacePath: `workspace/${item.finalPackagePath}`,
+      workspacePath,
       finalPackagePath: item.finalPackagePath,
       lineage: { inputArtifactIds: index === 0 ? [] : [`artifact-${index - 1}`] },
       createdAt: "2026-05-30T00:00:00.000Z",
       updatedAt: "2026-05-30T00:00:00.000Z",
-      reviewStatus: item.ownerAgentId === "reviewer-qa" ? "passed" : item.reviewRequired ? "pending" : "not_required",
+      reviewStatus: item.reviewRequired ? "passed" : "not_required",
       approvalStatus: "approved",
-      contentHash: `hash-${index}`
-    }));
+      contentHash: sha256(content)
+    });
+  }
+
+  return artifacts;
 }

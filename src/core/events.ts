@@ -10,7 +10,7 @@ export class JsonlEventStore implements EventStore {
     private readonly eventsPath: string
   ) {}
 
-  async append(input: Omit<Event, "id" | "timestamp">): Promise<Event> {
+  async append(input: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event> {
     const event: Event = {
       ...input,
       id: randomUUID(),
@@ -25,4 +25,3 @@ export class JsonlEventStore implements EventStore {
     return event;
   }
 }
-

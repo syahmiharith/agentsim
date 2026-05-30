@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+export type LiveModelProviderKind = "chat-completions-compatible";
+
 export interface LiveModelConfig {
+  providerKind: LiveModelProviderKind;
   apiKey?: string;
   baseUrl: string;
   model: string;
@@ -34,9 +37,25 @@ export function loadDotEnv(cwd = process.cwd()): void {
 
 export function getLiveModelConfig(): LiveModelConfig {
   return {
-    apiKey: process.env.OPENAI_API_KEY ?? process.env.OPENAI_COMPATIBLE_API_KEY,
-    baseUrl: process.env.OPENAI_BASE_URL ?? process.env.OPENAI_COMPATIBLE_BASE_URL ?? "https://api.openai.com/v1",
-    model: process.env.OPENAI_MODEL ?? process.env.OPENAI_COMPATIBLE_MODEL ?? "gpt-4.1-mini"
+    providerKind: parseProviderKind(process.env.AGENTSIM_MODEL_PROVIDER),
+    apiKey: process.env.AGENTSIM_MODEL_API_KEY
+      ?? process.env.OPENAI_API_KEY
+      ?? process.env.OPENAI_COMPATIBLE_API_KEY,
+    baseUrl: process.env.AGENTSIM_MODEL_BASE_URL
+      ?? process.env.OPENAI_BASE_URL
+      ?? process.env.OPENAI_COMPATIBLE_BASE_URL
+      ?? "https://api.openai.com/v1",
+    model: process.env.AGENTSIM_MODEL_NAME
+      ?? process.env.OPENAI_MODEL
+      ?? process.env.OPENAI_COMPATIBLE_MODEL
+      ?? "gpt-4.1-mini"
   };
 }
 
+function parseProviderKind(value: string | undefined): LiveModelProviderKind {
+  if (!value || value === "chat-completions-compatible") {
+    return "chat-completions-compatible";
+  }
+
+  throw new Error(`Unsupported AGENTSIM_MODEL_PROVIDER: ${value}`);
+}

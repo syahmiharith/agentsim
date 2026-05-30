@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { agentSteps } from "../src/agents/steps.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 
 describe("softwareFreelancePack", () => {
@@ -42,5 +43,33 @@ describe("softwareFreelancePack", () => {
     expect(spec.appName).toBe(appName);
     expect(spec.primaryEntity.name).toBe(entityName);
     expect(spec.workflowStatuses).toContain(status);
+  });
+
+  it("keeps manifest owners tied to executable agent steps", () => {
+    const agentIds = new Set(softwareFreelancePack.agents.map((agent) => agent.id));
+    const stepOutputTypes = new Set(agentSteps.map((step) => step.outputType));
+    const stepOwnerIds = new Set(agentSteps.map((step) => step.ownerAgentId));
+
+    for (const manifestItem of softwareFreelancePack.artifactManifest) {
+      expect(agentIds.has(manifestItem.ownerAgentId)).toBe(true);
+      if (manifestItem.required) {
+        expect(stepOutputTypes.has(manifestItem.type)).toBe(true);
+      }
+    }
+
+    for (const agent of softwareFreelancePack.agents) {
+      expect(stepOwnerIds.has(agent.id)).toBe(true);
+    }
+  });
+
+  it("orders agent steps after their declared input artifacts", () => {
+    const produced = new Set<string>();
+
+    for (const step of agentSteps) {
+      for (const requiredInput of step.requiredInputs) {
+        expect(produced.has(requiredInput)).toBe(true);
+      }
+      produced.add(step.outputType);
+    }
   });
 });

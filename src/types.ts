@@ -188,7 +188,7 @@ export interface ArtifactStore {
 }
 
 export interface EventStore {
-  append(event: Omit<Event, "id" | "timestamp">): Promise<Event>;
+  append(event: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event>;
 }
 
 export interface CreateArtifactInput {
@@ -229,6 +229,35 @@ export interface DomainPack {
   requiredTraceFiles: string[];
   reviewRubric: ReviewRubricCriterion[];
   inferDomainSpec(goal: string): DomainSpec;
+}
+
+export interface AgentContext {
+  runId: string;
+  goal: string;
+  domainSpec: DomainSpec;
+  modelProvider: ModelProvider;
+  workspace: Workspace;
+  workspaceDriver: WorkspaceDriver;
+  artifactsByType: Partial<Record<ArtifactType, Artifact>>;
+  appValidation?: { ok: boolean; message: string };
+}
+
+export interface AgentStepResult {
+  content: string;
+  workspaceRelativePath: string;
+  finalPackagePath: string;
+  status?: ArtifactStatus;
+  reviewStatus?: ReviewStatus;
+  approvalStatus?: ApprovalStatus;
+}
+
+export interface AgentStep {
+  id: string;
+  ownerAgentId: AgentRole;
+  outputType: ArtifactType;
+  requiredInputs: ArtifactType[];
+  reviewRequired: boolean;
+  execute(context: AgentContext): Promise<AgentStepResult>;
 }
 
 export interface ValidationResult {

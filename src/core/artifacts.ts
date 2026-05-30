@@ -19,7 +19,7 @@ export class FileArtifactStore implements ArtifactStore {
       id: randomUUID(),
       type: input.type,
       ownerAgentId: input.ownerAgentId,
-      status: input.status ?? "approved",
+      status: input.status ?? "draft",
       workspacePath,
       finalPackagePath: input.finalPackagePath,
       lineage: {
@@ -28,8 +28,8 @@ export class FileArtifactStore implements ArtifactStore {
       },
       createdAt: now,
       updatedAt: now,
-      reviewStatus: input.reviewStatus ?? "not_required",
-      approvalStatus: input.approvalStatus ?? "approved",
+      reviewStatus: input.reviewStatus ?? "pending",
+      approvalStatus: input.approvalStatus ?? "pending",
       contentHash: sha256(input.content)
     };
 
@@ -46,4 +46,3 @@ export class FileArtifactStore implements ArtifactStore {
     await writeFile(targetPath, JSON.stringify({ artifacts: this.artifacts }, null, 2), "utf8");
   }
 }
-

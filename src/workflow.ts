@@ -3,30 +3,13 @@ import { dirname, join } from "node:path";
 import { FileArtifactStore } from "./core/artifacts.js";
 import { JsonlEventStore } from "./core/events.js";
 import { validateFinalPackage } from "./core/final-package-validation.js";
+import { redactSecrets } from "./core/redact.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
 import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
 import { getAgent } from "./agents/agents.js";
-import {
-  apiPlan,
-  architecture,
-  assumptions,
-  codeReview,
-  databaseSchema,
-  handoffNotes,
-  knownIssues,
-  projectSummary,
-  proposal,
-  qaReport,
-  requirements,
-  risks,
-  scope,
-  taskBreakdown,
-  timeline,
-  userGuide
-} from "./templates/markdown.js";
-import { writeGeneratedApp } from "./templates/app.js";
+import { agentSteps } from "./agents/steps.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
-import type { Approval, Artifact, Decision, ModelProvider, RunSummary, TaskRun } from "./types.js";
+import type { AgentContext, Approval, Artifact, ArtifactType, Decision, ModelProvider, RunSummary, TaskRun } from "./types.js";
 
 export interface RunDemoOptions {
   goal: string;
@@ -46,16 +29,17 @@ export interface RunDemoResult {
 export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
   const outputRoot = options.outputRoot ?? "outputs";
   const runId = options.runId ?? createRunId();
+  const safeGoal = redactSecrets(options.goal);
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(runId, outputRoot);
   const eventStore = new JsonlEventStore(runId, join(workspace.finalPackageDir, "trace", "events.jsonl"));
   const artifactStore = new FileArtifactStore(workspace);
   const decisions: Decision[] = [];
   const domainPack = softwareFreelancePack;
-  const domainSpec = domainPack.inferDomainSpec(options.goal);
+  const domainSpec = domainPack.inferDomainSpec(safeGoal);
   const taskRun: TaskRun = {
     id: runId,
-    goal: options.goal,
+    goal: safeGoal,
     startedAt: new Date().toISOString(),
     status: "RUNNING",
     modelMode: options.modelProvider.mode,
@@ -63,18 +47,17 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
   };
 
   await eventStore.append({
-    runId,
     level: "info",
     name: "run.started",
     message: `Started Agentsim demo run ${runId}.`,
-      data: {
-        goal: options.goal,
-        modelMode: options.modelProvider.mode,
-        provider: options.modelProvider.name,
-        domainPackId: domainPack.id,
-        appName: domainSpec.appName,
-        domain: domainSpec.domain,
-        primaryEntity: domainSpec.primaryEntity.name
+    data: {
+      goal: safeGoal,
+      modelMode: options.modelProvider.mode,
+      provider: options.modelProvider.name,
+      domainPackId: domainPack.id,
+      appName: domainSpec.appName,
+      domain: domainSpec.domain,
+      primaryEntity: domainSpec.primaryEntity.name
     }
   });
 
@@ -96,21 +79,20 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     title: "Model provider selection",
     rationale: options.modelProvider.mode === "mock"
       ? "No live model key was required; deterministic mock mode keeps the demo and tests reproducible."
-      : "A live OpenAI-compatible provider was configured for this run.",
+      : "A live Chat Completions-compatible provider was configured for this run.",
     selectedOption: options.modelProvider.mode
   });
 
   try {
     if (options.modelProvider.mode === "live") {
       await eventStore.append({
-        runId,
         level: "info",
         name: "model.run_brief.started",
         message: "Requesting live model run brief."
       });
       const runBrief = await options.modelProvider.generate({
         system: "You are the planning coordinator for Agentsim. Return concise Markdown only.",
-        prompt: `Create a brief execution note for this freelance software delivery goal: ${options.goal}`,
+        prompt: `Create a brief execution note for this freelance software delivery goal: ${safeGoal}`,
         purpose: "run-brief"
       });
       decisions.push({
@@ -123,7 +105,6 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
         selectedOption: runBrief.model
       });
       await eventStore.append({
-        runId,
         level: "info",
         name: "model.run_brief.completed",
         message: "Live model run brief completed.",
@@ -131,222 +112,55 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       });
     }
 
-    const proposalArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "proposal",
-      ownerAgentId: "client-intake",
-      content: proposal(domainSpec),
-      workspaceRelativePath: "artifacts/client/proposal.md",
-      finalPackagePath: "client/proposal.md"
-    });
-    const summaryArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "project-summary",
-      ownerAgentId: "client-intake",
-      content: projectSummary(domainSpec),
-      workspaceRelativePath: "artifacts/client/project-summary.md",
-      finalPackagePath: "client/project-summary.md",
-      inputArtifactIds: [proposalArtifact.id]
-    });
-
-    const planningInputs = [proposalArtifact.id, summaryArtifact.id];
-    const requirementsArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "requirements",
-      ownerAgentId: "scope-pm",
-      content: requirements(domainSpec),
-      workspaceRelativePath: "artifacts/planning/requirements.md",
-      finalPackagePath: "planning/requirements.md",
-      inputArtifactIds: planningInputs
-    });
-    const scopeArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "scope",
-      ownerAgentId: "scope-pm",
-      content: scope(domainSpec),
-      workspaceRelativePath: "artifacts/planning/scope.md",
-      finalPackagePath: "planning/scope.md",
-      inputArtifactIds: [requirementsArtifact.id]
-    });
-    const assumptionsArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "assumptions",
-      ownerAgentId: "scope-pm",
-      content: assumptions(domainSpec),
-      workspaceRelativePath: "artifacts/planning/assumptions.md",
-      finalPackagePath: "planning/assumptions.md",
-      inputArtifactIds: [scopeArtifact.id]
-    });
-    const timelineArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "timeline",
-      ownerAgentId: "scope-pm",
-      content: timeline(domainSpec),
-      workspaceRelativePath: "artifacts/planning/timeline.md",
-      finalPackagePath: "planning/timeline.md",
-      inputArtifactIds: [scopeArtifact.id]
-    });
-    const risksArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "risks",
-      ownerAgentId: "scope-pm",
-      content: risks(domainSpec),
-      workspaceRelativePath: "artifacts/planning/risks.md",
-      finalPackagePath: "planning/risks.md",
-      inputArtifactIds: [scopeArtifact.id, assumptionsArtifact.id]
-    });
-
-    const architectureArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "architecture",
-      ownerAgentId: "software-architect",
-      content: architecture(domainSpec),
-      workspaceRelativePath: "artifacts/technical/architecture.md",
-      finalPackagePath: "technical/architecture.md",
-      inputArtifactIds: [requirementsArtifact.id, scopeArtifact.id]
-    });
-    const schemaArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "database-schema",
-      ownerAgentId: "software-architect",
-      content: databaseSchema(domainSpec),
-      workspaceRelativePath: "artifacts/technical/database-schema.md",
-      finalPackagePath: "technical/database-schema.md",
-      inputArtifactIds: [architectureArtifact.id]
-    });
-    const apiArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "api-plan",
-      ownerAgentId: "software-architect",
-      content: apiPlan(domainSpec),
-      workspaceRelativePath: "artifacts/technical/api-plan.md",
-      finalPackagePath: "technical/api-plan.md",
-      inputArtifactIds: [architectureArtifact.id, schemaArtifact.id]
-    });
-    const taskBreakdownArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "task-breakdown",
-      ownerAgentId: "scope-pm",
-      content: taskBreakdown(domainSpec),
-      workspaceRelativePath: "artifacts/planning/task-breakdown.md",
-      finalPackagePath: "planning/task-breakdown.md",
-      inputArtifactIds: [requirementsArtifact.id, architectureArtifact.id, apiArtifact.id]
-    });
-
-    await eventStore.append({
+    const artifactsByType: Partial<Record<ArtifactType, Artifact>> = {};
+    const context: AgentContext = {
       runId,
-      level: "info",
-      name: "app.generation.started",
-      agentId: "builder",
-      message: "Generating runnable app prototype.",
-      data: { appName: domainSpec.appName, entitySlug: domainSpec.primaryEntity.slug }
-    });
-    await writeGeneratedApp(workspace, driver, domainSpec);
-    await driver.copyDirectory(join(workspace.workspaceDir, "app"), join(workspace.finalPackageDir, "app"));
-    const appArtifact = await artifactStore.createMarkdown({
-      type: "app",
-      ownerAgentId: "builder",
-      content: "Generated runnable app prototype. See final-package/app/README.md.",
-      workspaceRelativePath: "artifacts/app.md",
-      finalPackagePath: "app/",
-      inputArtifactIds: [taskBreakdownArtifact.id, architectureArtifact.id, apiArtifact.id],
-      status: "exported",
-      reviewStatus: "pending",
-      approvalStatus: "approved"
-    });
-    await eventStore.append({
-      runId,
-      level: "info",
-      name: "artifact.produced",
-      agentId: "builder",
-      artifactId: appArtifact.id,
-      message: "Produced app prototype artifact.",
-      data: { finalPackagePath: "app/" }
-    });
+      goal: safeGoal,
+      domainSpec,
+      modelProvider: options.modelProvider,
+      workspace,
+      workspaceDriver: driver,
+      artifactsByType
+    };
 
-    const appValidation = await validateGeneratedApp(workspace.finalPackageDir);
-    const appValidationFailed = !appValidation.ok;
+    for (const step of agentSteps) {
+      const missingInputs = step.requiredInputs.filter((type) => !artifactsByType[type]);
+      if (missingInputs.length > 0) {
+        throw new Error(`Agent step ${step.id} is missing inputs: ${missingInputs.join(", ")}`);
+      }
 
-    const qaArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "qa-report",
-      ownerAgentId: "reviewer-qa",
-      content: qaReport(appValidation.message),
-      workspaceRelativePath: "artifacts/review/qa-report.md",
-      finalPackagePath: "review/qa-report.md",
-      inputArtifactIds: [appArtifact.id],
-      reviewStatus: appValidationFailed ? "failed" : "passed"
-    });
-    const codeReviewArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "code-review",
-      ownerAgentId: "reviewer-qa",
-      content: codeReview(domainSpec),
-      workspaceRelativePath: "artifacts/review/code-review.md",
-      finalPackagePath: "review/code-review.md",
-      inputArtifactIds: [appArtifact.id],
-      reviewStatus: "passed"
-    });
-    const knownIssuesArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "known-issues",
-      ownerAgentId: "reviewer-qa",
-      content: knownIssues(domainSpec, appValidationFailed),
-      workspaceRelativePath: "artifacts/review/known-issues.md",
-      finalPackagePath: "review/known-issues.md",
-      inputArtifactIds: [qaArtifact.id, codeReviewArtifact.id],
-      reviewStatus: appValidationFailed ? "failed" : "passed"
-    });
-    const handoffNotesArtifact = await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "handoff-notes",
-      ownerAgentId: "delivery",
-      content: handoffNotes(domainSpec),
-      workspaceRelativePath: "artifacts/client/handoff-notes.md",
-      finalPackagePath: "client/handoff-notes.md",
-      inputArtifactIds: [qaArtifact.id, knownIssuesArtifact.id, risksArtifact.id]
-    });
-    await createArtifact({
-      artifactStore,
-      eventStore,
-      goal: options.goal,
-      type: "user-guide",
-      ownerAgentId: "delivery",
-      content: userGuide(domainSpec),
-      workspaceRelativePath: "artifacts/client/user-guide.md",
-      finalPackagePath: "client/user-guide.md",
-      inputArtifactIds: [summaryArtifact.id, appArtifact.id, handoffNotesArtifact.id]
-    });
+      await eventStore.append({
+        level: "info",
+        name: "agent.step.started",
+        agentId: step.ownerAgentId,
+        message: `${getAgent(step.ownerAgentId).displayName} started ${step.outputType}.`,
+        data: {
+          stepId: step.id,
+          outputType: step.outputType,
+          requiredInputs: step.requiredInputs,
+          reviewRequired: step.reviewRequired
+        }
+      });
+
+      const stepResult = await step.execute(context);
+      const inputArtifactIds = step.requiredInputs.map((type) => artifactsByType[type]?.id).filter(isString);
+      const artifact = await createArtifact({
+        artifactStore,
+        eventStore,
+        goal: safeGoal,
+        stepId: step.id,
+        type: step.outputType,
+        ownerAgentId: step.ownerAgentId,
+        content: stepResult.content,
+        workspaceRelativePath: stepResult.workspaceRelativePath,
+        finalPackagePath: stepResult.finalPackagePath,
+        inputArtifactIds,
+        status: stepResult.status,
+        reviewStatus: stepResult.reviewStatus,
+        approvalStatus: stepResult.approvalStatus
+      });
+      artifactsByType[step.outputType] = artifact;
+    }
 
     for (const artifact of artifactStore.list()) {
       if (artifact.type !== "app") {
@@ -363,7 +177,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       madeAt: new Date().toISOString(),
       madeBy: "system",
       title: "Approval mode",
-      rationale: "The v0 demo uses auto-approval so the complete pipeline can run from one CLI command.",
+      rationale: "The v0 demo resolves artifact approvals inside the local pipeline after review-required steps pass.",
       selectedOption: "auto-approve"
     });
 
@@ -395,7 +209,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       taskRun.completedAt = new Date().toISOString();
       await writeRunSummary({
         runId,
-        goal: options.goal,
+        goal: safeGoal,
         status: taskRun.status,
         modelMode: taskRun.modelMode,
         provider: options.modelProvider.name,
@@ -405,7 +219,6 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
         failures: validationResult.failures
       }, workspace.finalPackageDir);
       await eventStore.append({
-        runId,
         level: "error",
         name: "run.validation_failed",
         agentId: "reviewer-qa",
@@ -419,7 +232,7 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     taskRun.completedAt = new Date().toISOString();
     await writeRunSummary({
       runId,
-      goal: options.goal,
+      goal: safeGoal,
       status: taskRun.status,
       modelMode: taskRun.modelMode,
       provider: options.modelProvider.name,
@@ -429,11 +242,10 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
       failures: []
     }, workspace.finalPackageDir);
     await eventStore.append({
-      runId,
       level: "info",
       name: "run.completed",
       agentId: "delivery",
-      artifactId: handoffNotesArtifact.id,
+      artifactId: artifactsByType["handoff-notes"]?.id,
       message: "Completed Agentsim demo run.",
       data: { finalPackageDir: workspace.finalPackageDir }
     });
@@ -452,7 +264,6 @@ export async function runDemo(options: RunDemoOptions): Promise<RunDemoResult> {
     }
     taskRun.completedAt = new Date().toISOString();
     await eventStore.append({
-      runId,
       level: "error",
       name: "run.failed",
       message: error instanceof Error ? error.message : "Unknown run failure."
@@ -469,31 +280,34 @@ async function createArtifact(input: {
   artifactStore: FileArtifactStore;
   eventStore: JsonlEventStore;
   goal: string;
+  stepId: string;
   type: Parameters<FileArtifactStore["createMarkdown"]>[0]["type"];
   ownerAgentId: Parameters<FileArtifactStore["createMarkdown"]>[0]["ownerAgentId"];
   content: string;
   workspaceRelativePath: string;
   finalPackagePath: string;
   inputArtifactIds?: string[];
+  status?: Parameters<FileArtifactStore["createMarkdown"]>[0]["status"];
   reviewStatus?: Parameters<FileArtifactStore["createMarkdown"]>[0]["reviewStatus"];
+  approvalStatus?: Parameters<FileArtifactStore["createMarkdown"]>[0]["approvalStatus"];
 }): Promise<Artifact> {
   const agent = getAgent(input.ownerAgentId);
-  const prompt = `${agent.mission}\n\nGoal: ${input.goal}\n\nArtifact: ${input.type}`;
+  const safeContent = redactSecrets(input.content);
+  const prompt = `${agent.mission}\n\nGoal: ${input.goal}\n\nStep: ${input.stepId}\nArtifact: ${input.type}`;
   const artifact = await input.artifactStore.createMarkdown({
     type: input.type,
     ownerAgentId: input.ownerAgentId,
-    content: input.content,
+    content: safeContent,
     workspaceRelativePath: input.workspaceRelativePath,
     finalPackagePath: input.finalPackagePath,
     inputArtifactIds: input.inputArtifactIds,
     reviewStatus: input.reviewStatus,
-    approvalStatus: "approved",
-    status: "approved",
+    approvalStatus: input.approvalStatus,
+    status: input.status,
     prompt
   });
 
   await input.eventStore.append({
-    runId: "",
     level: "info",
     name: "artifact.produced",
     agentId: input.ownerAgentId,
@@ -509,28 +323,8 @@ async function createArtifact(input: {
   return artifact;
 }
 
-async function validateGeneratedApp(finalPackageDir: string): Promise<{ ok: boolean; message: string }> {
-  const requiredFiles = ["app/package.json", "app/README.md", "app/server.js", "app/src/App.tsx", "app/src/main.tsx"];
-  const missing: string[] = [];
-
-  for (const file of requiredFiles) {
-    try {
-      await readFile(join(finalPackageDir, file), "utf8");
-    } catch {
-      missing.push(file);
-    }
-  }
-
-  if (missing.length > 0) {
-    return { ok: false, message: `Missing generated app files: ${missing.join(", ")}` };
-  }
-
-  const readme = await readFile(join(finalPackageDir, "app", "README.md"), "utf8");
-  if (!readme.includes("pnpm dev:api") || !readme.includes("pnpm dev:web")) {
-    return { ok: false, message: "Generated app README is missing run commands." };
-  }
-
-  return { ok: true, message: "Generated app structure and run instructions are present." };
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function createRunId(): string {
