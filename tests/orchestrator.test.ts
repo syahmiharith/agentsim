@@ -75,6 +75,47 @@ describe("scheduler-driven orchestrator", () => {
     expect(contextPackages).toHaveLength(2);
   });
 
+  it("prevents timed-out task attempts from writing late completion state", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-timeout-"));
+
+    await expect(runOrchestrator({
+      goal: "Build a slow tool",
+      outputRoot,
+      runId: "timeout-run",
+      modelProvider: new MockModelProvider(),
+      agentSteps: [{
+        ...testStep("client-proposal", "proposal", [], "client/proposal.md"),
+        timeoutMs: 20,
+        async execute(context) {
+          await delay(80);
+          expect(context.abortSignal?.aborted).toBe(true);
+          return {
+            content: "# proposal\n\nToo late.",
+            workspaceRelativePath: "artifacts/late-proposal.md",
+            finalPackagePath: "client/proposal.md",
+            status: "approved",
+            reviewStatus: "not_required",
+            approvalStatus: "approved",
+            outputSource: "template"
+          };
+        }
+      }],
+      validateFinalPackage: async () => okValidation()
+    })).rejects.toThrow("timed out");
+
+    await delay(120);
+    const runRoot = join(outputRoot, "timeout-run");
+    const tasks = JSON.parse(await readFile(join(runRoot, "state", "tasks.json"), "utf8"));
+    const events = await readFile(join(runRoot, "state", "events.jsonl"), "utf8");
+
+    await expect(readFile(join(runRoot, "state", "artifacts.json"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(runRoot, "state", "agent-actions.json"), "utf8")).rejects.toThrow();
+    expect(tasks[0]).toMatchObject({ status: "failed", attempts: 2 });
+    expect(events).toContain("task.timeout");
+    expect(events).not.toContain("agent.action.completed");
+    expect(events).not.toContain("late-proposal");
+  });
+
   it("retries a failed task and fails the run after max attempts", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-fail-"));
     let attempts = 0;
@@ -446,4 +487,8 @@ function testStep(
 
 function okValidation(): ValidationResult {
   return { ok: true, failures: [] };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

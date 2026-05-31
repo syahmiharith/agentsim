@@ -90,9 +90,10 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
         cwd,
         timeout: timeoutMs,
         maxBuffer: Math.max(maxOutputBytes * 8, 1024 * 1024),
-        env: sanitizedCommandEnv()
+        env: sanitizedCommandEnv(),
+        signal: input.abortSignal
       }, (error, stdout, stderr) => {
-        const timedOut = Boolean(error && "killed" in error && error.killed);
+        const timedOut = Boolean(error && "killed" in error && error.killed) || isAbortError(error) || Boolean(input.abortSignal?.aborted);
         const exitCode = deriveCommandExitCode(error, timedOut);
         resolveResult({
           command: input.command,
@@ -161,6 +162,13 @@ function deriveCommandExitCode(error: unknown, timedOut: boolean): number {
     return error.code;
   }
   return 1;
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError";
 }
 
 function sanitizedCommandEnv(): NodeJS.ProcessEnv {

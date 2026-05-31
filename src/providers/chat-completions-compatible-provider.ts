@@ -16,6 +16,7 @@ export class ChatCompletionsCompatibleProvider implements ModelProvider {
   async generate(request: ModelRequest): Promise<ModelResponse> {
     const response = await fetch(`${this.config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
+      signal: request.abortSignal,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.config.apiKey}`

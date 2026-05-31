@@ -151,7 +151,8 @@ async function generateLiveMarkdown(
       outputType: step.outputType,
       reviewRequired: step.reviewRequired
     }),
-    purpose: `agent-step:${step.id}`
+    purpose: `agent-step:${step.id}`,
+    abortSignal: context.abortSignal
   });
 
   return {

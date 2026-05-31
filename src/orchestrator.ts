@@ -78,6 +78,18 @@ export type TaskExecutionResult =
   | { status: "waiting_for_approval"; approvalId: string }
   | { status: "failed"; error: string };
 
+interface TaskExecutionAttempt {
+  id: string;
+  abortSignal: AbortSignal;
+  isActive(): boolean;
+}
+
+class TaskAttemptAbortedError extends Error {
+  constructor(readonly attemptId: string) {
+    super(`Task attempt ${attemptId} was aborted.`);
+  }
+}
+
 interface OrchestratorRuntime {
   runId: string;
   safeGoal: string;
@@ -582,7 +594,7 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
   }
 }
 
-export async function executeTask(runtime: OrchestratorRuntime, taskId: string): Promise<TaskExecutionResult> {
+export async function executeTask(runtime: OrchestratorRuntime, taskId: string, attempt?: TaskExecutionAttempt): Promise<TaskExecutionResult> {
   const task = await runtime.tasksRepo.getTask(taskId);
   if (task.status !== "ready") {
     return { status: "failed", error: `Task ${taskId} is not ready; current status is ${task.status}.` };
@@ -593,8 +605,11 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     return { status: "failed", error: `No agent step found for task ${task.id}.` };
   }
 
+  assertTaskAttemptActive(attempt);
   await runtime.tasksRepo.incrementTaskAttempt(task.id);
+  assertTaskAttemptActive(attempt);
   await runtime.tasksRepo.updateTaskStatus(task.id, "running");
+  assertTaskAttemptActive(attempt);
   await runtime.eventStore.append({
     level: "info",
     name: "task.started",
@@ -612,6 +627,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
   if (missingInputs.length > 0) {
     return { status: "failed", error: `Agent step ${step.id} is missing inputs: ${missingInputs.join(", ")}` };
   }
+  assertTaskAttemptActive(attempt);
 
   const inputArtifactIds = step.requiredInputs.map((type) => runtime.artifactsByType[type]?.id).filter(isString);
   const currentMessages = createAgentMessages({
@@ -643,6 +659,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       }
     });
   }
+  assertTaskAttemptActive(attempt);
 
   const contextPackage = await assembleContextPackage({
     runId: runtime.runId,
@@ -669,8 +686,10 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     });
     return { status: "failed", error: `Context package validation failed: ${contextValidation.failures.join("; ")}` };
   }
+  assertTaskAttemptActive(attempt);
   await runtime.contextPackagesRepo.createContextPackage(contextPackage);
   runtime.contextPackages.push(contextPackage);
+  assertTaskAttemptActive(attempt);
 
   const context: AgentContext = {
     runId: runtime.runId,
@@ -682,6 +701,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     workspaceDriver: runtime.workspaceDriver,
     artifactsByType: runtime.artifactsByType,
     contextPackage,
+    abortSignal: attempt?.abortSignal,
     tools: createToolRuntime({
       runId: runtime.runId,
       workspace: runtime.workspace,
@@ -695,11 +715,13 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       modelMode: runtime.modelProvider.mode,
       allowCommands: runtime.allowCommands,
       commandPolicy: runtime.commandPolicy,
+      abortSignal: attempt?.abortSignal,
       hasApproval: (action) => hasApprovedAction(action, runtime.approvalsRepo),
       requestApproval: (approval) => requestToolApproval(runtime.runId, runtime.approvalsRepo, { ...approval, taskId: approval.taskId ?? task.id })
     }),
     currentMessages
   };
+  assertTaskAttemptActive(attempt);
 
   await runtime.eventStore.append({
     level: "info",
@@ -737,6 +759,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
 
   try {
     const stepResult = await step.execute(context);
+    assertTaskAttemptActive(attempt);
     const artifact = await createArtifact({
       artifactStore: runtime.artifactStore,
       eventStore: runtime.eventStore,
@@ -754,6 +777,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       reviewStatus: stepResult.reviewStatus,
       approvalStatus: stepResult.approvalStatus
     });
+    assertTaskAttemptActive(attempt);
 
     actionRecord.status = "completed";
     actionRecord.completedAt = new Date().toISOString();
@@ -780,6 +804,9 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
 
     return { status: "completed", artifact, actionRecord, messages: currentMessages };
   } catch (error) {
+    if (error instanceof TaskAttemptAbortedError || attempt?.abortSignal.aborted || attempt?.isActive() === false) {
+      return { status: "failed", error: error instanceof Error ? redactSecrets(error.message) : "Task attempt aborted." };
+    }
     if (error instanceof ToolApprovalRequiredError) {
       const existing = (await runtime.approvalsRepo.listApprovalsByRun())
         .find((approval) => approval.action === error.action && approval.status === "pending");
@@ -855,7 +882,10 @@ export async function handleTaskResult(runtime: OrchestratorRuntime, taskId: str
 }
 
 export async function retryOrFailTask(runtime: OrchestratorRuntime, taskId: string, error: unknown): Promise<void> {
-  const task = await runtime.tasksRepo.getTask(taskId);
+  let task = await runtime.tasksRepo.getTask(taskId);
+  if (task.status === "ready") {
+    task = await runtime.tasksRepo.updateTaskStatus(taskId, "running");
+  }
   const message = error instanceof Error ? redactSecrets(error.message) : "Unknown task failure.";
   if (task.attempts < task.maxAttempts) {
     await runtime.tasksRepo.updateTaskStatus(taskId, "failed", message);
@@ -1040,28 +1070,48 @@ function selectReadyTaskBatch(tasks: Task[], maxConcurrentTasks: number): Task[]
 
 async function executeTaskWithTimeout(runtime: OrchestratorRuntime, task: Task): Promise<TaskExecutionResult> {
   const timeoutMs = task.timeoutMs ?? runtime.workflowGraph.nodes.find((node) => node.id === task.id)?.timeoutMs ?? 60_000;
+  const abortController = new AbortController();
+  const attemptId = randomUUID();
+  let active = true;
+  const attempt: TaskExecutionAttempt = {
+    id: attemptId,
+    abortSignal: abortController.signal,
+    isActive: () => active
+  };
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      executeTask(runtime, task.id),
+      executeTask(runtime, task.id, attempt),
       new Promise<TaskExecutionResult>((resolveResult) => {
-        timer = setTimeout(async () => {
-          await runtime.eventStore.append({
+        timer = setTimeout(() => {
+          active = false;
+          resolveResult({ status: "failed", error: `Task ${task.id} timed out after ${timeoutMs}ms.` });
+          abortController.abort();
+          void runtime.eventStore.append({
             level: "error",
             name: "task.timeout",
             agentId: task.assignedAgentId,
             taskId: task.id,
             message: `Task ${task.id} timed out after ${timeoutMs}ms.`,
-            data: { timeoutMs }
+            data: { timeoutMs, taskAttemptId: attemptId }
           });
-          resolveResult({ status: "failed", error: `Task ${task.id} timed out after ${timeoutMs}ms.` });
         }, timeoutMs);
       })
     ]);
   } finally {
+    active = false;
     if (timer) {
       clearTimeout(timer);
     }
+  }
+}
+
+function assertTaskAttemptActive(attempt: TaskExecutionAttempt | undefined): void {
+  if (!attempt) {
+    return;
+  }
+  if (attempt.abortSignal.aborted || !attempt.isActive()) {
+    throw new TaskAttemptAbortedError(attempt.id);
   }
 }
 

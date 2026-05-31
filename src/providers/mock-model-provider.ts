@@ -5,10 +5,12 @@ export class MockModelProvider implements ModelProvider {
   readonly name = "deterministic-mock";
 
   async generate(request: ModelRequest): Promise<ModelResponse> {
+    if (request.abortSignal?.aborted) {
+      throw new Error("Model request aborted.");
+    }
     return {
       content: `Mock model response for ${request.purpose}.\n\n${request.prompt}`,
       model: this.name
     };
   }
 }
-

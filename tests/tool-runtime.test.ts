@@ -84,6 +84,27 @@ describe("tool runtime", () => {
     expect(await context.workspaceDriver.readFile(context.workspace, "allowed.md")).toBe("yes");
   });
 
+  it("refuses tool side effects after the task context is aborted", async () => {
+    const context = await createRuntimeContext("tool-aborted");
+    const controller = new AbortController();
+    controller.abort();
+    context.abortSignal = controller.signal;
+    const tools = createToolRuntime(context);
+
+    await expect(tools.writeFile({ path: "blocked.md", content: "nope" })).rejects.toThrow("Tool execution aborted");
+    await expect(tools.createArtifact({
+      type: "requirements",
+      ownerAgentId: "scope-pm",
+      content: "requirements",
+      workspaceRelativePath: "artifacts/requirements.md",
+      finalPackagePath: "planning/requirements.md",
+      status: "approved",
+      reviewStatus: "not_required",
+      approvalStatus: "approved"
+    })).rejects.toThrow("Tool execution aborted");
+    expect(context.artifactStore.list()).toEqual([]);
+  });
+
   it("requires run_command to be allowed by policy before approval is requested", async () => {
     const context = await createRuntimeContext("tool-command-policy-denied", true);
     context.contextPolicy = {

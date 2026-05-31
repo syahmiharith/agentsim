@@ -4,30 +4,42 @@ import { askHumanTool, createArtifactTool, listFilesTool, readFileTool, runComma
 export function createToolRuntime(context: ToolContext): ToolRuntime {
   return {
     async readFile(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, readFileTool.name);
       return readFileTool.execute(input, context);
     },
     async writeFile(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, writeFileTool.name);
       return writeFileTool.execute(input, context);
     },
     async listFiles(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, listFilesTool.name);
       return listFilesTool.execute(input, context);
     },
     async createArtifact(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, createArtifactTool.name);
       return createArtifactTool.execute(input, context);
     },
     async runCommand(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, runCommandTool.name);
       return runCommandTool.execute(input, context);
     },
     async askHuman(input) {
+      assertToolNotAborted(context);
       await assertToolAllowed(context, askHumanTool.name);
       return askHumanTool.execute(input, context);
     }
   };
+}
+
+function assertToolNotAborted(context: ToolContext): void {
+  if (context.abortSignal?.aborted) {
+    throw new Error("Tool execution aborted.");
+  }
 }
 
 export async function assertToolAllowed(context: ToolContext, toolName: string): Promise<void> {

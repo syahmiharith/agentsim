@@ -308,6 +308,7 @@ export interface ModelRequest {
   system: string;
   prompt: string;
   purpose: string;
+  abortSignal?: AbortSignal;
 }
 
 export interface ModelResponse {
@@ -351,6 +352,7 @@ export interface RunCommandInput {
   timeoutMs?: number;
   maxOutputBytes?: number;
   commandPolicy?: CommandPolicy;
+  abortSignal?: AbortSignal;
 }
 
 export interface WorkspaceDriver {
@@ -386,6 +388,7 @@ export interface ToolContext {
   modelMode: ModelMode;
   allowCommands?: boolean;
   commandPolicy?: CommandPolicy;
+  abortSignal?: AbortSignal;
   hasApproval?: (action: string) => boolean | Promise<boolean>;
   requestApproval?: (approval: Omit<Approval, "id" | "runId" | "requestedAt" | "createdAt" | "status" | "notes"> & { notes?: string }) => Promise<Approval>;
 }
@@ -470,6 +473,7 @@ export interface AgentContext {
   tools?: ToolRuntime;
   currentMessages?: AgentMessageRecord[];
   appValidation?: { ok: boolean; message: string };
+  abortSignal?: AbortSignal;
 }
 
 export interface AgentStepResult {

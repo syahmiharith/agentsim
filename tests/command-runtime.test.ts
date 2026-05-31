@@ -59,6 +59,24 @@ describe("safe command execution", () => {
     expect(stateTrace).toContain("\"timedOut\":true");
   });
 
+  it("aborts running commands through the provided abort signal", async () => {
+    const { driver, workspace } = await createWorkspace("command-abort");
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 25);
+
+    await expect(driver.runCommand(workspace, {
+      command: "node",
+      args: ["-e", "setTimeout(() => {}, 1000)"],
+      timeoutMs: 1000,
+      commandPolicy: resolveCommandPolicy("unsafe-local"),
+      abortSignal: controller.signal
+    })).rejects.toThrow("Command failed with exit code 124");
+
+    const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");
+    expect(stateTrace).toContain("\"timedOut\":true");
+    expect(stateTrace).not.toContain("\"exitCode\":0");
+  });
+
   it("records nonzero process failures without reporting success", async () => {
     const { driver, workspace } = await createWorkspace("command-nonzero");
 

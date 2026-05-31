@@ -16,6 +16,7 @@ export const readFileTool: ToolDefinition<{ path: string }, string> = {
   riskLevel: "safe",
   requiresApproval: false,
   async execute(input, context) {
+    assertToolNotAborted(context);
     await emitToolCalled(context, "read_file", input.path);
     safeJoin(context.workspace.workspaceDir, input.path);
     return context.workspaceDriver.readFile(context.workspace, input.path);
@@ -28,6 +29,7 @@ export const writeFileTool: ToolDefinition<{ path: string; content: string }, st
   riskLevel: "medium",
   requiresApproval: false,
   async execute(input, context) {
+    assertToolNotAborted(context);
     await emitToolCalled(context, "write_file", input.path);
     safeJoin(context.workspace.workspaceDir, input.path);
     return context.workspaceDriver.writeFile(context.workspace, input.path, input.content);
@@ -40,6 +42,7 @@ export const listFilesTool: ToolDefinition<{ path?: string }, string[]> = {
   riskLevel: "safe",
   requiresApproval: false,
   async execute(input, context) {
+    assertToolNotAborted(context);
     const path = input.path ?? ".";
     await emitToolCalled(context, "list_files", path);
     safeJoin(context.workspace.workspaceDir, path);
@@ -53,6 +56,7 @@ export const createArtifactTool: ToolDefinition<CreateArtifactInput, { id: strin
   riskLevel: "medium",
   requiresApproval: false,
   async execute(input, context) {
+    assertToolNotAborted(context);
     await emitToolCalled(context, "create_artifact", input.finalPackagePath);
     if (!context.artifactStore) {
       throw new Error("create_artifact requires an active artifact store.");
@@ -69,6 +73,7 @@ export const runCommandTool: ToolDefinition<RunCommandInput, RunCommandResult> =
   riskLevel: "dangerous",
   requiresApproval: true,
   async execute(input, context) {
+    assertToolNotAborted(context);
     const action = [input.command, ...(input.args ?? [])].join(" ");
     if (context.modelMode === "mock" && !context.allowCommands) {
       throw new Error("run_command is disabled in mock mode unless allowCommands is true.");
@@ -84,7 +89,8 @@ export const runCommandTool: ToolDefinition<RunCommandInput, RunCommandResult> =
     }
     return context.workspaceDriver.runCommand(context.workspace, {
       ...input,
-      commandPolicy: context.commandPolicy
+      commandPolicy: context.commandPolicy,
+      abortSignal: context.abortSignal
     });
   }
 };
@@ -95,6 +101,7 @@ export const askHumanTool: ToolDefinition<{ action: string; taskId?: string; req
   riskLevel: "dangerous",
   requiresApproval: true,
   async execute(input, context) {
+    assertToolNotAborted(context);
     await emitToolCalled(context, "ask_human", input.action);
     if (!context.requestApproval) {
       throw new ToolApprovalRequiredError("ask_human", input.action);
@@ -118,6 +125,12 @@ export const defaultTools = [
   runCommandTool,
   askHumanTool
 ] as const;
+
+function assertToolNotAborted(context: ToolContext): void {
+  if (context.abortSignal?.aborted) {
+    throw new Error("Tool execution aborted.");
+  }
+}
 
 async function requireApproval<I, O>(tool: ToolDefinition<I, O>, action: string, context: ToolContext): Promise<void> {
   if (!tool.requiresApproval) {
