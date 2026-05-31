@@ -13,12 +13,14 @@ import type {
   ContextPackage,
   ContextPolicy,
   Decision,
+  RepoContextSummary,
   Task,
   ValidationResult
 } from "../types.js";
 import type { DomainSpec } from "../domain/domain-spec.js";
 import { sha256 } from "./hash.js";
 import { redactSecrets } from "./redact.js";
+import { validateAllowedTools } from "./tool-registry.js";
 
 export interface AssembleContextPackageInput {
   runId: string;
@@ -26,6 +28,7 @@ export interface AssembleContextPackageInput {
   task: Task;
   step: AgentStep;
   domainSpec: DomainSpec;
+  repoContext?: RepoContextSummary;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
   messages: AgentMessageRecord[];
   decisions: Decision[];
@@ -96,6 +99,18 @@ export async function assembleContextPackage(input: AssembleContextPackageInput)
       source: "domain.spec",
       sourceId: input.runId,
       content: JSON.stringify(input.domainSpec, null, 2),
+      createdAt,
+      policy
+    }));
+  }
+
+  if (input.repoContext) {
+    items.push(createContextItem({
+      runId: input.runId,
+      kind: "repo_summary",
+      source: "repo.context",
+      sourceId: input.runId,
+      content: JSON.stringify(input.repoContext, null, 2),
       createdAt,
       policy
     }));
@@ -214,6 +229,8 @@ export function validateContextPackage(pkg: ContextPackage): ValidationResult {
   const presentKinds = new Set(pkg.items.map((item) => item.kind));
   const artifactItemSourceIds = new Set(pkg.items.filter((item) => item.kind === "artifact").map((item) => item.sourceId).filter(Boolean));
   const totalChars = pkg.items.reduce((sum, item) => sum + item.content.length, 0);
+  const toolValidation = validateAllowedTools(pkg.policy);
+  failures.push(...toolValidation.failures);
 
   for (const kind of pkg.policy.requiredKinds) {
     if (!presentKinds.has(kind)) {

@@ -11,11 +11,14 @@ import { safeJoin } from "./core/paths.js";
 import { redactSecrets } from "./core/redact.js";
 import { LocalAgentActionsRepo, LocalApprovalsRepo, LocalArtifactsRepo, LocalContextPackagesRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
 import { createFixTask, reviewResultFromValidation } from "./core/review-loop.js";
+import { resolveCommandPolicy } from "./core/command-policy.js";
+import { scanRepoContext } from "./core/repo-context.js";
 import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, markReadyTasks } from "./core/scheduler.js";
-import { compileAgentStepsToTasks } from "./core/task-compiler.js";
+import { builtInToolRegistry } from "./core/tool-registry.js";
 import { createToolRuntime, hasApprovedAction, requestToolApproval } from "./core/tool-runtime.js";
 import { ToolApprovalRequiredError } from "./core/tools.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
+import { compileAgentStepsToWorkflowGraph, exportWorkflowGraph, workflowGraphToTasks, type WorkflowGraph } from "./core/workflow-graph.js";
 import type { DomainInferenceResult } from "./domain/domain-inference.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
 import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
@@ -29,10 +32,13 @@ import type {
   Artifact,
   ArtifactType,
   ContextPackage,
+  CommandPolicy,
+  CommandPolicyLevel,
   Decision,
   DomainPack,
   EventStore,
   ModelProvider,
+  RepoContextSummary,
   Run,
   RunSummary,
   Task,
@@ -46,6 +52,10 @@ export interface RunDemoOptions {
   outputRoot?: string;
   runId?: string;
   modelProvider: ModelProvider;
+  repoPath?: string;
+  allowCommands?: boolean;
+  commandPolicyLevel?: CommandPolicyLevel;
+  maxConcurrentTasks?: number;
 }
 
 export interface RunDemoResult {
@@ -60,7 +70,6 @@ export interface RunOrchestratorOptions extends RunDemoOptions {
   agentSteps?: AgentStep[];
   domainPack?: DomainPack;
   validateFinalPackage?: typeof defaultValidateFinalPackage;
-  allowCommands?: boolean;
   enableRepairLoop?: boolean;
 }
 
@@ -76,6 +85,9 @@ interface OrchestratorRuntime {
   domainPack: DomainPack;
   domainSpec: DomainSpec;
   domainInference: DomainInferenceResult;
+  repoContext?: RepoContextSummary;
+  workflowGraph: WorkflowGraph;
+  commandPolicy: CommandPolicy;
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   artifactStore: FileArtifactStore;
@@ -96,6 +108,7 @@ interface OrchestratorRuntime {
   validateFinalPackage: typeof defaultValidateFinalPackage;
   allowCommands: boolean;
   enableRepairLoop: boolean;
+  maxConcurrentTasks: number;
 }
 
 export async function runOrchestrator(options: RunOrchestratorOptions): Promise<RunDemoResult> {
@@ -120,6 +133,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const domainInference = inferWithMetadata(domainPack, safeGoal);
   const domainSpec = domainInference.spec;
   const steps = options.agentSteps ?? defaultAgentSteps;
+  const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
   const decisions: Decision[] = [];
   const agentActions: AgentActionRecord[] = [];
   const agentMessages: AgentMessageRecord[] = [];
@@ -133,6 +147,30 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     modelMode: options.modelProvider.mode,
     outputDir: workspace.rootDir
   };
+  let workflowGraph: WorkflowGraph;
+  let repoContext: RepoContextSummary | undefined;
+  try {
+    workflowGraph = compileAgentStepsToWorkflowGraph(runId, steps);
+    repoContext = options.repoPath ? await scanRepoContext(options.repoPath) : undefined;
+  } catch (error) {
+    const message = error instanceof Error ? redactSecrets(error.message) : "Run setup failed.";
+    await runsRepo.createRun({
+      id: runId,
+      userGoal: safeGoal,
+      status: "failed",
+      modelMode: options.modelProvider.mode,
+      outputRoot: workspace.rootDir,
+      createdAt: taskRun.startedAt,
+      updatedAt: new Date().toISOString(),
+      failureReason: message
+    });
+    await eventStore.append({
+      level: "error",
+      name: "run.failed",
+      message
+    });
+    throw error;
+  }
 
   const runtime: OrchestratorRuntime = {
     runId,
@@ -141,6 +179,9 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     domainPack,
     domainSpec,
     domainInference,
+    repoContext,
+    workflowGraph,
+    commandPolicy,
     workspace,
     workspaceDriver: driver,
     artifactStore,
@@ -160,7 +201,8 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     steps,
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
     allowCommands: options.allowCommands ?? false,
-    enableRepairLoop: options.enableRepairLoop ?? false
+    enableRepairLoop: options.enableRepairLoop ?? false,
+    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1)
   };
 
   try {
@@ -235,9 +277,12 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const domainSpec = await loadPersistedDomainSpec(runRoot, domainPack, existingRun.userGoal);
   const domainInference = await loadPersistedDomainInference(runRoot, domainPack, existingRun.userGoal, domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
+  const workflowGraph = await loadPersistedWorkflowGraph(runRoot, options.runId, steps);
+  const repoContext = await loadPersistedRepoContext(runRoot);
+  const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
   const existingTasks = await tasksRepo.listTasksByRun();
   if (existingTasks.length === 0) {
-    await tasksRepo.saveTasks(compileAgentStepsToTasks(options.runId, steps));
+    await tasksRepo.saveTasks(workflowGraphToTasks(workflowGraph));
   }
 
   for (const task of await tasksRepo.listTasksByRun()) {
@@ -278,6 +323,9 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     domainPack,
     domainSpec,
     domainInference,
+    repoContext,
+    workflowGraph,
+    commandPolicy,
     workspace,
     workspaceDriver: driver,
     artifactStore,
@@ -297,7 +345,8 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     steps,
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
     allowCommands: options.allowCommands ?? false,
-    enableRepairLoop: options.enableRepairLoop ?? false
+    enableRepairLoop: options.enableRepairLoop ?? false,
+    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1)
   };
 
   const taskRun: TaskRun = {
@@ -469,6 +518,16 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       applied.push("trace/context-eval.json");
     }
 
+    if (failures.some((failure) => failure.includes("trace/workflow-graph.json"))) {
+      await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.finalPackageDir, "trace/workflow-graph.json"));
+      applied.push("trace/workflow-graph.json");
+    }
+
+    if (failures.some((failure) => failure.includes("trace/tool-registry.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/tool-registry.json"), JSON.stringify(builtInToolRegistry, null, 2), "utf8");
+      applied.push("trace/tool-registry.json");
+    }
+
     if (failures.some((failure) => failure.includes("trace/artifact-lineage.json") || failure.includes("lineage"))) {
       await runtime.artifactStore.exportLineage(safeJoin(runtime.workspace.finalPackageDir, "trace/artifact-lineage.json"));
       applied.push("trace/artifact-lineage.json");
@@ -591,6 +650,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     task,
     step,
     domainSpec: runtime.domainSpec,
+    repoContext: runtime.repoContext,
     artifactsByType: runtime.artifactsByType,
     messages: currentMessages,
     decisions: runtime.decisions,
@@ -616,6 +676,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
     runId: runtime.runId,
     goal: runtime.safeGoal,
     domainSpec: runtime.domainSpec,
+    repoContext: runtime.repoContext,
     modelProvider: runtime.modelProvider,
     workspace: runtime.workspace,
     workspaceDriver: runtime.workspaceDriver,
@@ -633,6 +694,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string):
       approvalsRepo: runtime.approvalsRepo,
       modelMode: runtime.modelProvider.mode,
       allowCommands: runtime.allowCommands,
+      commandPolicy: runtime.commandPolicy,
       hasApproval: (action) => hasApprovedAction(action, runtime.approvalsRepo),
       requestApproval: (approval) => requestToolApproval(runtime.runId, runtime.approvalsRepo, { ...approval, taskId: approval.taskId ?? task.id })
     }),
@@ -832,7 +894,12 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
   await runtime.runsRepo.createRun(runState);
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
-  await runtime.tasksRepo.saveTasks(compileAgentStepsToTasks(runtime.runId, runtime.steps));
+  await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.rootDir, "state/workflow-graph.json"));
+  await writeFile(safeJoin(runtime.workspace.rootDir, "state/tool-registry.json"), JSON.stringify(builtInToolRegistry, null, 2), "utf8");
+  if (runtime.repoContext) {
+    await writeFile(safeJoin(runtime.workspace.rootDir, "state/repo-context.json"), JSON.stringify(runtime.repoContext, null, 2), "utf8");
+  }
+  await runtime.tasksRepo.saveTasks(workflowGraphToTasks(runtime.workflowGraph));
   await runtime.eventStore.append({
     level: "info",
     name: "run.started",
@@ -934,15 +1001,67 @@ async function runSchedulerLoop(runtime: OrchestratorRuntime): Promise<void> {
       throw new Error("Task graph is blocked by a failed dependency.");
     }
 
-    const readyTask = getReadyTasks(tasks)
-      .sort((left, right) => (stepOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (stepOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER))[0];
+    const readyTasks = getReadyTasks(tasks)
+      .sort((left, right) => (stepOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (stepOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+    const readyBatch = selectReadyTaskBatch(readyTasks, runtime.maxConcurrentTasks);
 
-    if (!readyTask) {
+    if (readyBatch.length === 0) {
       await failRun(runtime, "NO_READY_TASKS", "No ready tasks remain, but the run is not complete.");
       throw new Error("No ready tasks remain, but the run is not complete.");
     }
 
-    await handleTaskResult(runtime, readyTask.id, await executeTask(runtime, readyTask.id));
+    const results = await Promise.all(readyBatch.map(async (task) => ({
+      taskId: task.id,
+      result: await executeTaskWithTimeout(runtime, task)
+    })));
+    for (const { taskId, result } of results) {
+      await handleTaskResult(runtime, taskId, result);
+    }
+  }
+}
+
+function selectReadyTaskBatch(tasks: Task[], maxConcurrentTasks: number): Task[] {
+  const selected: Task[] = [];
+  const outputArtifactTypes = new Set<ArtifactType>();
+  for (const task of tasks) {
+    if (selected.length >= maxConcurrentTasks) {
+      break;
+    }
+    if (task.outputArtifactType && outputArtifactTypes.has(task.outputArtifactType)) {
+      continue;
+    }
+    selected.push(task);
+    if (task.outputArtifactType) {
+      outputArtifactTypes.add(task.outputArtifactType);
+    }
+  }
+  return selected;
+}
+
+async function executeTaskWithTimeout(runtime: OrchestratorRuntime, task: Task): Promise<TaskExecutionResult> {
+  const timeoutMs = task.timeoutMs ?? runtime.workflowGraph.nodes.find((node) => node.id === task.id)?.timeoutMs ?? 60_000;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      executeTask(runtime, task.id),
+      new Promise<TaskExecutionResult>((resolveResult) => {
+        timer = setTimeout(async () => {
+          await runtime.eventStore.append({
+            level: "error",
+            name: "task.timeout",
+            agentId: task.assignedAgentId,
+            taskId: task.id,
+            message: `Task ${task.id} timed out after ${timeoutMs}ms.`,
+            data: { timeoutMs }
+          });
+          resolveResult({ status: "failed", error: `Task ${task.id} timed out after ${timeoutMs}ms.` });
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -985,6 +1104,11 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
 
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
+  await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.finalPackageDir, "trace/workflow-graph.json"));
+  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/tool-registry.json"), JSON.stringify(builtInToolRegistry, null, 2), "utf8");
+  if (runtime.repoContext) {
+    await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/repo-context.json"), JSON.stringify(runtime.repoContext, null, 2), "utf8");
+  }
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/decisions.json"), JSON.stringify({ decisions: runtime.decisions }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals: traceApprovals }, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-messages.json"), JSON.stringify({ messages: runtime.agentMessages }, null, 2), "utf8");
@@ -1098,6 +1222,22 @@ async function loadPersistedDomainInference(runRoot: string, domainPack: DomainP
     return { ...persisted, spec: domainSpec };
   } catch {
     return { ...inferWithMetadata(domainPack, goal), spec: domainSpec };
+  }
+}
+
+async function loadPersistedWorkflowGraph(runRoot: string, runId: string, steps: AgentStep[]): Promise<WorkflowGraph> {
+  try {
+    return JSON.parse(await readFile(safeJoin(runRoot, "state/workflow-graph.json"), "utf8")) as WorkflowGraph;
+  } catch {
+    return compileAgentStepsToWorkflowGraph(runId, steps);
+  }
+}
+
+async function loadPersistedRepoContext(runRoot: string): Promise<RepoContextSummary | undefined> {
+  try {
+    return JSON.parse(await readFile(safeJoin(runRoot, "state/repo-context.json"), "utf8")) as RepoContextSummary;
+  } catch {
+    return undefined;
   }
 }
 

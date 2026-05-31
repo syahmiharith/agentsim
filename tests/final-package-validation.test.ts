@@ -339,6 +339,17 @@ async function createCompletePackage(): Promise<string> {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, "test", "utf8");
   }
+  await writeFile(join(finalPackageDir, "trace", "workflow-graph.json"), JSON.stringify({
+    schemaVersion: 1,
+    runId: "validation-run",
+    generatedAt: "2026-05-30T00:00:00.000Z",
+    nodes: [{ id: "step-0", kind: "artifact_generation", agentId: "client-intake", outputArtifactType: "project-summary" }],
+    edges: []
+  }, null, 2), "utf8");
+  await writeFile(join(finalPackageDir, "trace", "tool-registry.json"), JSON.stringify({
+    schemaVersion: 1,
+    tools: [{ name: "write_file", riskLevel: "medium", requiresApproval: false, description: "Write a file.", provider: "builtin" }]
+  }, null, 2), "utf8");
 
   return finalPackageDir;
 }

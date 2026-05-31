@@ -45,12 +45,15 @@ Current capabilities:
 - Core contracts for `Agent`, `AgentStep`, `TaskRun`, `Run`, `Task`, `Artifact`, `ContextPackage`, `Workspace`, `Decision`, `Approval`, `Event`, `Organization`, `Project`, and `DomainPack`.
 - Artifact-producing agent step registry for the current intake, planning, architecture, build, review, and delivery roles.
 - Deterministic task graph compilation from the current `AgentStep` registry.
+- Persisted workflow graph metadata with CLI graph inspection.
 - Local run, task, artifact, message, context package, event, and approval state persistence.
 - Real local resume from persisted run state after approvals are resolved.
 - Scheduler helpers for dependency-ready, blocked, failed, and terminal task state.
 - State transition helpers for run and task lifecycles.
 - Risk-aware local tool wrappers for workspace files, artifacts, commands, and human approval requests.
 - CLI inspection commands for runs, events, artifacts, tasks, approvals, and context packages.
+- Static local run viewer and built-in tool registry inspection commands.
+- Optional read-only repo context import for local runs.
 - Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
 - Structured agent messages, agent action records, context packages, artifact lineage, decision logs, approval records, and event trace.
@@ -79,7 +82,7 @@ Acceptance:
 - One command creates a complete delivery package.
 - Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, context packages, events, decisions, approvals, lineage, and run summary.
 - Every run has persisted run, task, artifact, message, context package, event, and approval state.
-- Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim events`, `agentsim artifacts`, `agentsim approvals`, `agentsim contexts`, and `agentsim context`.
+- Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim graph`, `agentsim events`, `agentsim artifacts`, `agentsim approvals`, `agentsim contexts`, `agentsim context`, and `agentsim viewer`.
 - Approval-paused runs can continue with `agentsim approve` followed by `agentsim resume`.
 - The code still defaults to local filesystem and mock mode without keys.
 

@@ -27,13 +27,13 @@ type MarkdownFactory = (context: AgentContext) => string;
 
 export const agentSteps: AgentStep[] = [
   markdownStep("client-proposal", "client-intake", "draft client proposal", "proposal", [], false, "artifacts/client/proposal.md", "client/proposal.md", (ctx) => proposal(ctx.domainSpec)),
-  markdownStep("client-summary", "client-intake", "summarize project outcome", "project-summary", ["proposal"], false, "artifacts/client/project-summary.md", "client/project-summary.md", (ctx) => projectSummary(ctx.domainSpec)),
-  markdownStep("planning-requirements", "scope-pm", "define requirements", "requirements", ["proposal", "project-summary"], false, "artifacts/planning/requirements.md", "planning/requirements.md", (ctx) => requirements(ctx.domainSpec)),
+  markdownStep("client-summary", "client-intake", "summarize project outcome", "project-summary", ["proposal"], false, "artifacts/client/project-summary.md", "client/project-summary.md", (ctx) => projectSummary(ctx.domainSpec, ctx.repoContext)),
+  markdownStep("planning-requirements", "scope-pm", "define requirements", "requirements", ["proposal", "project-summary"], false, "artifacts/planning/requirements.md", "planning/requirements.md", (ctx) => requirements(ctx.domainSpec, ctx.repoContext)),
   markdownStep("planning-scope", "scope-pm", "set MVP scope boundaries", "scope", ["requirements"], false, "artifacts/planning/scope.md", "planning/scope.md", (ctx) => scope(ctx.domainSpec)),
   markdownStep("planning-assumptions", "scope-pm", "record assumptions", "assumptions", ["scope"], false, "artifacts/planning/assumptions.md", "planning/assumptions.md", (ctx) => assumptions(ctx.domainSpec)),
   markdownStep("planning-timeline", "scope-pm", "estimate delivery timeline", "timeline", ["scope"], false, "artifacts/planning/timeline.md", "planning/timeline.md", (ctx) => timeline(ctx.domainSpec)),
   markdownStep("planning-risks", "scope-pm", "identify project risks", "risks", ["scope", "assumptions"], false, "artifacts/planning/risks.md", "planning/risks.md", (ctx) => risks(ctx.domainSpec)),
-  markdownStep("technical-architecture", "software-architect", "design technical architecture", "architecture", ["requirements", "scope"], false, "artifacts/technical/architecture.md", "technical/architecture.md", (ctx) => architecture(ctx.domainSpec)),
+  markdownStep("technical-architecture", "software-architect", "design technical architecture", "architecture", ["requirements", "scope"], false, "artifacts/technical/architecture.md", "technical/architecture.md", (ctx) => architecture(ctx.domainSpec, ctx.repoContext)),
   markdownStep("technical-database-schema", "software-architect", "design local data model", "database-schema", ["architecture"], false, "artifacts/technical/database-schema.md", "technical/database-schema.md", (ctx) => databaseSchema(ctx.domainSpec)),
   markdownStep("technical-api-plan", "software-architect", "design local API plan", "api-plan", ["architecture", "database-schema"], false, "artifacts/technical/api-plan.md", "technical/api-plan.md", (ctx) => apiPlan(ctx.domainSpec)),
   markdownStep("planning-task-breakdown", "scope-pm", "break down implementation tasks", "task-breakdown", ["requirements", "architecture", "api-plan"], false, "artifacts/planning/task-breakdown.md", "planning/task-breakdown.md", (ctx) => taskBreakdown(ctx.domainSpec)),

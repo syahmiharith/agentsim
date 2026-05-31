@@ -139,11 +139,71 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   await validateContextEvaluation(input.finalPackageDir, failures);
   await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, contextPackages, failures);
   await validateDomainInferenceTrace(input.finalPackageDir, failures);
+  await validateWorkflowGraphTrace(input.finalPackageDir, failures);
+  await validateToolRegistryTrace(input.finalPackageDir, failures);
+  await validateRepoContextTrace(input.finalPackageDir, failures);
 
   return {
     ok: failures.length === 0,
     failures
   };
+}
+
+async function validateWorkflowGraphTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const graphPath = join(finalPackageDir, "trace", "workflow-graph.json");
+  if (!(await pathExists(graphPath))) {
+    return;
+  }
+  try {
+    const graph = JSON.parse(await readFile(graphPath, "utf8")) as { schemaVersion?: unknown; nodes?: unknown; edges?: unknown };
+    if (graph.schemaVersion !== 1) {
+      failures.push("Workflow graph trace schemaVersion must be 1");
+    }
+    if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+      failures.push("Workflow graph trace must include nodes");
+    }
+    if (!Array.isArray(graph.edges)) {
+      failures.push("Workflow graph trace must include edges");
+    }
+  } catch {
+    failures.push("Workflow graph trace is not valid JSON");
+  }
+}
+
+async function validateToolRegistryTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const registryPath = join(finalPackageDir, "trace", "tool-registry.json");
+  if (!(await pathExists(registryPath))) {
+    return;
+  }
+  try {
+    const registry = JSON.parse(await readFile(registryPath, "utf8")) as { schemaVersion?: unknown; tools?: unknown };
+    if (registry.schemaVersion !== 1) {
+      failures.push("Tool registry trace schemaVersion must be 1");
+    }
+    if (!Array.isArray(registry.tools) || !registry.tools.every((tool) => typeof tool?.name === "string")) {
+      failures.push("Tool registry trace tools must include tool names");
+    }
+  } catch {
+    failures.push("Tool registry trace is not valid JSON");
+  }
+}
+
+async function validateRepoContextTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const repoPath = join(finalPackageDir, "trace", "repo-context.json");
+  if (!(await pathExists(repoPath))) {
+    return;
+  }
+  try {
+    const repoContext = JSON.parse(await readFile(repoPath, "utf8")) as { rootPath?: unknown; importantFiles?: unknown };
+    if (typeof repoContext.rootPath !== "string" || repoContext.rootPath.length === 0) {
+      failures.push("Repo context trace is missing rootPath");
+    }
+    if (!Array.isArray(repoContext.importantFiles)) {
+      failures.push("Repo context trace importantFiles must be an array");
+    }
+  } catch {
+    failures.push("Repo context trace is not valid JSON");
+  }
 }
 
 async function validateDomainInferenceTrace(finalPackageDir: string, failures: string[]): Promise<void> {

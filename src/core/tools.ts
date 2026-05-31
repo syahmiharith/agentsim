@@ -1,4 +1,4 @@
-import type { ArtifactType, CreateArtifactInput, RunCommandResult, ToolContext, ToolDefinition } from "../types.js";
+import type { ArtifactType, CreateArtifactInput, RunCommandInput, RunCommandResult, ToolContext, ToolDefinition } from "../types.js";
 import { safeJoin } from "./paths.js";
 
 export class ToolApprovalRequiredError extends Error {
@@ -63,7 +63,7 @@ export const createArtifactTool: ToolDefinition<CreateArtifactInput, { id: strin
   }
 };
 
-export const runCommandTool: ToolDefinition<{ command: string; args?: string[] }, RunCommandResult> = {
+export const runCommandTool: ToolDefinition<RunCommandInput, RunCommandResult> = {
   name: "run_command",
   description: "Run a local command in the workspace when explicitly allowed.",
   riskLevel: "dangerous",
@@ -82,7 +82,10 @@ export const runCommandTool: ToolDefinition<{ command: string; args?: string[] }
     if (!context.workspaceDriver.runCommand) {
       throw new Error("run_command is not supported by this workspace driver.");
     }
-    return context.workspaceDriver.runCommand(context.workspace, input);
+    return context.workspaceDriver.runCommand(context.workspace, {
+      ...input,
+      commandPolicy: context.commandPolicy
+    });
   }
 };
 
@@ -130,6 +133,7 @@ async function requireApproval<I, O>(tool: ToolDefinition<I, O>, action: string,
       riskLevel: tool.riskLevel === "dangerous" ? "high" : "medium",
       notes: `Approval required before executing ${tool.name}.`
     });
+    throw new ToolApprovalRequiredError(tool.name, action);
   }
   throw new ToolApprovalRequiredError(tool.name, action);
 }

@@ -32,6 +32,8 @@ Current capability:
 * generate planning, technical, review, client handoff, trace, and app prototype files
 * run in deterministic mock mode without provider keys
 * persist run, task, artifact, event, message, and approval state under each run
+* inspect workflow graph, artifacts, context, tools, and static viewer output from the CLI
+* import optional read-only repo context for local package generation
 * inspect and resume local runs from the CLI after approvals are resolved
 * run a deterministic mock eval suite across several freelance software prompts
 * use a model-agnostic Chat Completions-compatible provider in live mode when configured
@@ -41,7 +43,7 @@ Current limitations:
 * generated apps are simple prototypes and still need human review before client delivery
 * the workflow is tuned for the first software-freelance demo, not arbitrary domains
 * approvals, workspace execution, command execution, repair loops, and provider routing are still early
-* the task graph is local-first and sequential; it is not a distributed scheduler
+* the workflow graph is local-first; it is not a distributed scheduler
 * command execution is disabled by default and requires both approval and explicit opt-in
 * no hosted service, dashboard, or production deployment automation exists yet
 
@@ -103,6 +105,8 @@ outputs/{runId}/final-package/
     +-- agent-messages.json
     +-- agent-actions.json
     +-- decisions.json
+    +-- workflow-graph.json
+    +-- tool-registry.json
     +-- artifact-lineage.json
 ```
 
@@ -199,6 +203,9 @@ outputs/{runId}/state/
 +-- artifacts.json
 +-- approvals.json
 +-- domain-spec.json
++-- domain-inference.json
++-- workflow-graph.json
++-- tool-registry.json
 ```
 
 Use the inspection commands to read that state:
@@ -209,6 +216,10 @@ pnpm agentsim tasks <runId>
 pnpm agentsim events <runId>
 pnpm agentsim artifacts <runId>
 pnpm agentsim approvals <runId>
+pnpm agentsim graph <runId>
+pnpm agentsim contexts <runId>
+pnpm agentsim viewer <runId>
+pnpm agentsim tools
 ```
 
 Approval records can be resolved locally:
@@ -222,6 +233,20 @@ pnpm agentsim resume <runId> [--mock|--live]
 If a run pauses for approval, resolve it with `approve` or `reject`. `resume` rehydrates the existing run state from `outputs/{runId}/state/` and continues the scheduler from the same run ID. It refuses terminal runs and runs with pending approvals. When no provider flag is supplied, resume uses the persisted run model mode.
 
 The current mock workflow only uses safe default operations, so completed mock runs usually have auto-approved artifact records rather than pending dangerous tool approvals. Dangerous tools such as `run_command` stay disabled unless the orchestrator is explicitly configured to allow commands.
+
+Optional local context can be imported without copying private source into the final package:
+
+```bash
+pnpm agentsim run "Build a client portal for this project" --mock --repo .
+```
+
+Command execution remains disabled by default. When enabled, `run_command` still requires tool approval, a context policy that allows `run_command`, and a command policy:
+
+```bash
+pnpm agentsim run "Build an inventory request system" --mock --allow-commands --command-policy dev
+```
+
+Available command policies are `strict`, `dev`, and `unsafe-local`. `unsafe-local` requires `--allow-commands` and is intended only for trusted local workspaces.
 
 ## Development
 

@@ -1,4 +1,5 @@
 import type { DomainSpec, FieldSpec } from "../domain/domain-spec.js";
+import type { RepoContextSummary } from "../types.js";
 
 export function titleFromGoal(goal: string): string {
   const normalized = goal.replace(/\s+/g, " ").trim();
@@ -34,7 +35,7 @@ Agentsim will produce ${article(spec.appName)} prototype for ${spec.domain}. The
 `;
 }
 
-export function projectSummary(spec: DomainSpec): string {
+export function projectSummary(spec: DomainSpec, repoContext?: RepoContextSummary): string {
   return `# Project Summary
 
 ## Client Goal
@@ -56,10 +57,11 @@ ${bulletList(spec.screens.map((screen) => `${screen.name}: ${screen.purpose}`))}
 ## Package Notes
 
 This package is intentionally narrow. It demonstrates the core workflow without production authentication, hosted deployment, or deep third-party integrations.
+${repoContextNote(repoContext)}
 `;
 }
 
-export function requirements(spec: DomainSpec): string {
+export function requirements(spec: DomainSpec, repoContext?: RepoContextSummary): string {
   return `# Requirements
 
 ## Source Goal
@@ -91,6 +93,7 @@ ${fieldList(spec.primaryEntity.fields)}
 - Keep the interface simple enough for the target workflow.
 - Avoid storing secrets or API keys in generated files.
 - Make the delivery package understandable without reading source code first.
+${repoContextNote(repoContext)}
 `;
 }
 
@@ -165,7 +168,7 @@ ${bulletList([
 `;
 }
 
-export function architecture(spec: DomainSpec): string {
+export function architecture(spec: DomainSpec, repoContext?: RepoContextSummary): string {
   return `# Architecture
 
 ## Overview
@@ -185,6 +188,7 @@ The prototype uses a Vite React frontend and a lightweight Node HTTP API. The AP
 3. The API validates required fields and writes the record to JSON storage.
 4. Admin users update workflow status from the queue.
 5. The UI refreshes the queue after each mutation.
+${repoContextNote(repoContext)}
 `;
 }
 
@@ -323,6 +327,15 @@ A reviewed local MVP package for: ${spec.sourceGoal}
 
 Do not deploy this prototype publicly until authentication, production persistence, backups, and environment-specific configuration are added.
 `;
+}
+
+function repoContextNote(repoContext: RepoContextSummary | undefined): string {
+  if (!repoContext) {
+    return "";
+  }
+  const frameworks = repoContext.frameworks.length > 0 ? repoContext.frameworks.join(", ") : "no framework";
+  const managers = repoContext.packageManagers.length > 0 ? repoContext.packageManagers.join(", ") : "no package manager";
+  return `\n## Imported Repo Context\n\nAgentsim imported read-only context from \`${repoContext.rootPath}\`, detecting ${frameworks} and ${managers}. The generated package still avoids copying private source content or secrets.`;
 }
 
 export function userGuide(spec: DomainSpec): string {

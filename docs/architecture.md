@@ -28,7 +28,7 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 
 | Module | Responsibility |
 | --- | --- |
-| `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, `tui`, inspection, approval, and resume command parsing. |
+| `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, `tui`, inspection, viewer, tool registry, approval, and resume command parsing. |
 | `src/workflow.ts` | Preserves the existing `runDemo()` compatibility entry point. |
 | `src/orchestrator.ts` | Owns run creation, resume, scheduler execution, task execution, validation, approval pause, and final package completion. |
 | `src/types.ts` | Holds core contracts used across the CLI, workflow, artifacts, events, and providers. |
@@ -40,10 +40,13 @@ The current workflow starts from a client-style goal, infers a software-freelanc
 | `src/core/events.ts` | Writes redacted JSONL event traces. |
 | `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, lineage, and context provenance. |
 | `src/core/paths.ts` | Prevents absolute-path use and workspace escape for relative path operations. |
+| `src/core/repo-context.ts` | Imports bounded read-only local repo summaries without copying source contents or secret files. |
 | `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, actions, context packages, messages, events, and approvals. |
 | `src/core/scheduler.ts` | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets. |
 | `src/core/state-machines.ts` | Validates allowed run and task status transitions. |
-| `src/core/task-compiler.ts` | Converts the existing `AgentStep` registry into a deterministic task graph. |
+| `src/core/task-compiler.ts` | Projects workflow graph nodes into persisted task state for compatibility. |
+| `src/core/workflow-graph.ts` | Compiles `AgentStep` entries into a deterministic workflow graph with nodes, edges, timeouts, and validation. |
+| `src/core/tool-registry.ts` | Exposes the built-in tool manifest and validates context-policy `allowedTools`. |
 | `src/core/tools.ts` | Wraps file, artifact, command, and approval tools with risk-aware execution rules. |
 | `src/core/tool-runtime.ts` | Injects the active tool runtime into agent execution using the current stores, repos, and workspace. |
 | `src/core/workspace.ts` | Provides the local filesystem workspace driver. |
@@ -105,14 +108,19 @@ pnpm agentsim inspect <runId>
 pnpm agentsim events <runId>
 pnpm agentsim artifacts <runId>
 pnpm agentsim tasks <runId>
+pnpm agentsim graph <runId>
 pnpm agentsim approvals <runId>
 pnpm agentsim contexts <runId>
 pnpm agentsim context <runId> <contextPackageId>
+pnpm agentsim viewer <runId>
+pnpm agentsim tools
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
 pnpm agentsim resume <runId> [--mock|--live]
 pnpm eval:mock
 ```
+
+`run` and `demo` also accept `--repo <path>` for bounded read-only repo summary import, `--max-concurrent-tasks <n>` for local scheduler batching, and the command-execution flags `--allow-commands --command-policy <strict|dev|unsafe-local>`.
 
 ## Workflow Layer
 
@@ -123,7 +131,8 @@ Main responsibilities:
 - create a local workspace
 - create event and artifact stores
 - create a persisted run record
-- compile `AgentStep` entries into persisted tasks
+- compile `AgentStep` entries into a validated workflow graph
+- persist graph metadata and project tasks derived from that graph
 - rehydrate existing run state for `resume`
 - mark dependency-ready tasks before execution
 - infer a `DomainSpec` through the domain pack and persist it for resume
@@ -137,7 +146,7 @@ Main responsibilities:
 - write `trace/run-summary.json`
 - return run metadata to the CLI
 
-The current orchestration version remains sequential so the final package stays compatible. The scheduler and repositories are intentionally separate so later work can add richer execution without changing the artifact contract.
+The default orchestration path remains single-task execution so the final package stays compatible. The scheduler can run a bounded batch of ready tasks when requested, while avoiding duplicate output producers in the same batch. Repositories remain separate so later work can add richer execution without changing the artifact contract.
 
 `resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, reloads the persisted domain spec, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses. If no model flag is supplied, the CLI uses the persisted run model mode.
 
@@ -186,6 +195,9 @@ Trace expectations:
 - `trace/decisions.json` records system and human decisions
 - `trace/approvals.json` records artifact, tool, and human approval state
 - `trace/domain-spec.json` records inferred domain behavior
+- `trace/workflow-graph.json` records compiled workflow nodes, edges, timeouts, and conditions
+- `trace/tool-registry.json` records available built-in tool manifests
+- `trace/repo-context.json` records optional read-only repo context when `--repo` is used
 - `trace/artifact-lineage.json` records artifact metadata and dependencies
 - `trace/run-summary.json` records run result and validation status
 
@@ -203,13 +215,16 @@ outputs/{runId}/state/
 +-- events.jsonl
 +-- artifacts.json
 +-- approvals.json
++-- workflow-graph.json
++-- tool-registry.json
++-- repo-context.json        # only when --repo is used
 ```
 
 The `state/` files are for local resume, inspection, approvals, and scheduler state. The `final-package/trace/` files remain the reviewer-facing debug output.
 
 ## Context Package Layer
 
-`src/core/context.ts` turns runtime context into an inspectable contract. Before an agent step executes, the orchestrator assembles a `ContextPackage` from the user goal, task objective, domain spec, required input artifacts, structured messages, decisions, and approvals allowed by the step policy.
+`src/core/context.ts` turns runtime context into an inspectable contract. Before an agent step executes, the orchestrator assembles a `ContextPackage` from the user goal, task objective, domain spec, optional repo summary, required input artifacts, structured messages, decisions, and approvals allowed by the step policy.
 
 Validation gates enforce:
 
@@ -246,6 +261,7 @@ The risk-aware tool runtime defines `read_file`, `write_file`, `list_files`, `cr
 - `create_artifact` uses the active artifact store and repository, not a disconnected store.
 - `run_command` is dangerous, approval-required, allowlisted, timed, output-capped, and uses a sanitized environment.
 - Command execution remains disabled unless explicitly allowed.
+- Command policy is separate from approval. `strict` allows only narrow version/syntax checks, `dev` allows bounded local package commands such as `pnpm build`, and `unsafe-local` preserves the broader local allowlist for trusted workspaces.
 - When a context policy is active, tools must also be listed in
   `allowedTools`; denied calls emit `tool.blocked_by_policy`.
 - Approval-required tools create or require approval state instead of silently executing.

@@ -49,6 +49,8 @@ describe("demo workflow", () => {
       "trace/decisions.json",
       "trace/domain-spec.json",
       "trace/domain-inference.json",
+      "trace/workflow-graph.json",
+      "trace/tool-registry.json",
       "trace/artifact-lineage.json",
       "trace/run-summary.json"
     ];
@@ -108,10 +110,14 @@ describe("demo workflow", () => {
     const stateDomainSpec = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-spec.json"), "utf8"));
     const stateDomainInference = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-inference.json"), "utf8"));
     const traceDomainInference = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-inference.json"), "utf8"));
+    const workflowGraph = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "workflow-graph.json"), "utf8"));
+    const toolRegistry = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "tool-registry.json"), "utf8"));
     expect(stateRun.status).toBe("completed");
     expect(stateDomainSpec.appName).toBe("Inventory Request Desk");
     expect(stateDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
     expect(traceDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
+    expect(workflowGraph.nodes.find((node: { id: string }) => node.id === "builder-app")).toMatchObject({ kind: "app_generation" });
+    expect(toolRegistry.tools.some((tool: { name: string }) => tool.name === "write_file")).toBe(true);
     expect(stateTasks.every((task: { status: string; attempts: number }) => task.status === "completed" && task.attempts === 1)).toBe(true);
     expect(stateArtifacts).toHaveLength(result.artifacts.length);
     expect(stateContextPackages).toHaveLength(agentActions.actions.length);

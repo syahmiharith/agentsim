@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Approval, Artifact, ContextPackage, Event, Run, Task, TaskStatus } from "./types.js";
+import type { Approval, Artifact, ContextPackage, Event, RepoContextSummary, Run, Task, TaskStatus } from "./types.js";
+import type { ToolRegistry } from "./core/tool-registry.js";
+import type { WorkflowGraph } from "./core/workflow-graph.js";
 
 export interface RunInspectionModel {
   run: Run;
@@ -11,6 +13,9 @@ export interface RunInspectionModel {
   approvals: Approval[];
   contextPackages: ContextPackage[];
   events: Event[];
+  workflowGraph?: WorkflowGraph;
+  repoContext?: RepoContextSummary;
+  toolRegistry?: ToolRegistry;
 }
 
 export async function loadRunInspection(outputRoot: string, runId?: string): Promise<RunInspectionModel> {
@@ -27,7 +32,10 @@ export async function loadRunInspection(outputRoot: string, runId?: string): Pro
     artifacts: await readJson<Artifact[]>(join(stateRoot, "artifacts.json"), []),
     approvals: await readJson<Approval[]>(join(stateRoot, "approvals.json"), []),
     contextPackages: await readJson<ContextPackage[]>(join(stateRoot, "context-packages.json"), []),
-    events: await readEvents(join(stateRoot, "events.jsonl"))
+    events: await readEvents(join(stateRoot, "events.jsonl")),
+    workflowGraph: await readJson<WorkflowGraph | undefined>(join(stateRoot, "workflow-graph.json"), undefined),
+    repoContext: await readJson<RepoContextSummary | undefined>(join(stateRoot, "repo-context.json"), undefined),
+    toolRegistry: await readJson<ToolRegistry | undefined>(join(stateRoot, "tool-registry.json"), undefined)
   };
 }
 
@@ -44,9 +52,23 @@ export function renderInspect(model: RunInspectionModel): string {
     `Artifact count: ${model.artifacts.length}`,
     `Context package count: ${model.contextPackages.length}`,
     `Approval count: ${model.approvals.length}`,
+    `Workflow graph: ${model.workflowGraph ? `${model.workflowGraph.nodes.length} nodes, ${model.workflowGraph.edges.length} edges` : "not found"}`,
+    `Repo context: ${model.repoContext ? `${model.repoContext.fileCount} files scanned` : "not imported"}`,
     "Latest events:",
     ...(latestEvents.length > 0 ? latestEvents : ["none"])
   ].join("\n");
+}
+
+export function renderGraph(model: RunInspectionModel): string {
+  if (!model.workflowGraph) {
+    return "No workflow graph metadata found.";
+  }
+  const tasksById = new Map(model.tasks.map((task) => [task.id, task]));
+  return model.workflowGraph.nodes.map((node) => {
+    const dependencies = model.workflowGraph?.edges.filter((edge) => edge.to === node.id).map((edge) => edge.from) ?? [];
+    const task = tasksById.get(node.id);
+    return `${node.id} | ${node.kind} | ${node.agentId} | ${task?.status ?? "-"} | deps=${dependencies.join(",") || "-"} | output=${node.outputArtifactType} | timeoutMs=${node.timeoutMs}`;
+  }).join("\n");
 }
 
 export function renderEvents(model: RunInspectionModel): string {
@@ -148,8 +170,8 @@ async function readJson<T>(path: string, fallback?: T): Promise<T> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as T;
   } catch (error) {
-    if (fallback !== undefined) {
-      return fallback;
+    if (arguments.length >= 2) {
+      return fallback as T;
     }
     throw error;
   }

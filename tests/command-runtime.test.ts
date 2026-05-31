@@ -2,14 +2,16 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveCommandPolicy } from "../src/core/command-policy.js";
 import { LocalFilesystemWorkspaceDriver } from "../src/core/workspace.js";
 
 describe("safe command execution", () => {
   it("rejects disallowed commands and cwd escapes", async () => {
     const { driver, workspace } = await createWorkspace("command-reject");
 
-    await expect(driver.runCommand(workspace, { command: "git", args: ["status"] })).rejects.toThrow("Command is not allowlisted");
+    await expect(driver.runCommand(workspace, { command: "git", args: ["status"] })).rejects.toThrow("Command is not allowed");
     await expect(driver.runCommand(workspace, { command: "node", args: ["--version"], cwd: "../" })).rejects.toThrow("Command cwd must stay inside workspace");
+    await expect(driver.runCommand(workspace, { command: "node", args: ["-e", "console.log('blocked')"] })).rejects.toThrow("strict policy");
   });
 
   it("runs allowlisted commands, caps output, filters env, and writes traces", async () => {
@@ -21,7 +23,8 @@ describe("safe command execution", () => {
       const result = await driver.runCommand(workspace, {
         command: "node",
         args: ["-e", "console.log((process.env.AGENTSIM_MODEL_API_KEY || 'missing') + ':' + 'x'.repeat(200))"],
-        maxOutputBytes: 40
+        maxOutputBytes: 40,
+        commandPolicy: resolveCommandPolicy("unsafe-local")
       });
 
       expect(result.exitCode).toBe(0);
@@ -48,7 +51,8 @@ describe("safe command execution", () => {
     await expect(driver.runCommand(workspace, {
       command: "node",
       args: ["-e", "setTimeout(() => {}, 1000)"],
-      timeoutMs: 10
+      timeoutMs: 10,
+      commandPolicy: resolveCommandPolicy("unsafe-local")
     })).rejects.toThrow("Command failed with exit code 124");
 
     const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");
@@ -60,7 +64,8 @@ describe("safe command execution", () => {
 
     await expect(driver.runCommand(workspace, {
       command: "node",
-      args: ["-e", "process.exit(7)"]
+      args: ["-e", "process.exit(7)"],
+      commandPolicy: resolveCommandPolicy("unsafe-local")
     })).rejects.toThrow("Command failed with exit code 7");
 
     const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");

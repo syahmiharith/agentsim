@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, readdir, readFile, rm, writeFile, appendFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { RunCommandInput, RunCommandResult, Workspace, WorkspaceDriver } from "../types.js";
+import { assertCommandAllowed, resolveCommandPolicy } from "./command-policy.js";
 import { assertPathInside, safeJoin } from "./paths.js";
 import { redactSecrets } from "./redact.js";
 
@@ -60,14 +61,28 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
   }
 
   async runCommand(workspace: Workspace, input: RunCommandInput): Promise<RunCommandResult> {
-    const allowedCommands = new Set(["node", "npm", "pnpm"]);
-    if (!allowedCommands.has(input.command)) {
-      throw new Error(`Command is not allowlisted: ${input.command}`);
+    const cwd = resolveCommandCwd(workspace, input.cwd);
+    const policy = input.commandPolicy ?? resolveCommandPolicy("strict");
+    const validation = assertCommandAllowed(input, policy);
+    if (!validation.ok) {
+      const denied: RunCommandResult = {
+        command: input.command,
+        args: input.args ?? [],
+        cwd,
+        exitCode: 126,
+        stdout: "",
+        stderr: validation.failures.join("; "),
+        durationMs: 0,
+        timedOut: false,
+        policyLevel: policy.level,
+        deniedReason: validation.failures.join("; ")
+      };
+      await appendCommandResultTrace(workspace, denied);
+      throw new Error(denied.deniedReason);
     }
 
-    const cwd = resolveCommandCwd(workspace, input.cwd);
-    const timeoutMs = input.timeoutMs ?? 30_000;
-    const maxOutputBytes = input.maxOutputBytes ?? 64_000;
+    const timeoutMs = Math.min(input.timeoutMs ?? policy.maxTimeoutMs, policy.maxTimeoutMs);
+    const maxOutputBytes = Math.min(input.maxOutputBytes ?? policy.maxOutputBytes, policy.maxOutputBytes);
     const startedAt = Date.now();
 
     const result = await new Promise<RunCommandResult>((resolveResult) => {
@@ -87,7 +102,8 @@ export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
           stdout: capOutput(redactSecrets(stdout), maxOutputBytes),
           stderr: capOutput(redactSecrets(stderr), maxOutputBytes),
           durationMs: Date.now() - startedAt,
-          timedOut
+          timedOut,
+          policyLevel: policy.level
         });
       });
     });
@@ -170,7 +186,9 @@ async function appendCommandResultTrace(workspace: Workspace, result: RunCommand
     stdoutPreview: result.stdout,
     stderrPreview: result.stderr,
     durationMs: result.durationMs,
-    timedOut: result.timedOut
+    timedOut: result.timedOut,
+    policyLevel: result.policyLevel,
+    deniedReason: result.deniedReason
   };
   const statePath = safeJoin(workspace.rootDir, "state/command-results.jsonl");
   const tracePath = safeJoin(workspace.finalPackageDir, "trace/command-results.jsonl");

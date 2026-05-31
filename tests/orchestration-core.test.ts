@@ -6,6 +6,7 @@ import { LocalApprovalsRepo, LocalArtifactsRepo, LocalEventsRepo, LocalRunsRepo,
 import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, markReadyTasks } from "../src/core/scheduler.js";
 import { canTransitionRun, canTransitionTask, transitionRun, transitionTask } from "../src/core/state-machines.js";
 import { compileAgentStepsToTasks } from "../src/core/task-compiler.js";
+import { compileAgentStepsToWorkflowGraph, validateWorkflowGraph, workflowGraphToTasks } from "../src/core/workflow-graph.js";
 import { ToolApprovalRequiredError, runCommandTool } from "../src/core/tools.js";
 import { agentSteps } from "../src/agents/steps.js";
 import type { Run, Task, ToolContext, Workspace } from "../src/types.js";
@@ -79,6 +80,22 @@ describe("agent step compiler", () => {
     expect(tasks.find((task) => task.id === "planning-requirements")?.dependsOn.sort()).toEqual(["client-proposal", "client-summary"]);
     expect(tasks.find((task) => task.id === "builder-app")?.dependsOn.sort()).toEqual(["planning-task-breakdown", "technical-api-plan", "technical-architecture"]);
     expect(tasks.find((task) => task.id === "review-qa-report")?.dependsOn).toEqual(["builder-app"]);
+  });
+
+  it("exports workflow graph metadata before task projection", () => {
+    const graph = compileAgentStepsToWorkflowGraph("run-1", agentSteps);
+    expect(validateWorkflowGraph(graph).ok).toBe(true);
+    expect(graph.nodes.find((node) => node.id === "builder-app")).toMatchObject({
+      kind: "app_generation",
+      timeoutMs: 60_000,
+      maxAttempts: 2
+    });
+    expect(graph.edges).toContainEqual({
+      from: "planning-task-breakdown",
+      to: "builder-app",
+      reason: "requires artifact task-breakdown"
+    });
+    expect(workflowGraphToTasks(graph).find((task) => task.id === "builder-app")?.timeoutMs).toBe(60_000);
   });
 });
 

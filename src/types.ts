@@ -16,9 +16,11 @@ export type TaskKind = "artifact_generation" | "app_generation" | "review" | "fi
 export type ToolRiskLevel = "safe" | "medium" | "dangerous";
 export type ApprovalRiskLevel = "low" | "medium" | "high";
 export type ReviewVerdict = "pass" | "revise" | "fail";
+export type CommandPolicyLevel = "strict" | "dev" | "unsafe-local";
 export type ContextItemKind =
   | "user_goal"
   | "domain_spec"
+  | "repo_summary"
   | "task"
   | "artifact"
   | "message"
@@ -158,6 +160,7 @@ export interface Task {
   outputArtifactType?: ArtifactType;
   attempts: number;
   maxAttempts: number;
+  timeoutMs?: number;
   reviewCycle?: number;
   createdAt: string;
   updatedAt: string;
@@ -318,6 +321,15 @@ export interface ModelProvider {
   generate(request: ModelRequest): Promise<ModelResponse>;
 }
 
+export interface CommandPolicy {
+  level: CommandPolicyLevel;
+  allowedCommands: string[];
+  allowedArgPatterns: Record<string, string[]>;
+  maxTimeoutMs: number;
+  maxOutputBytes: number;
+  allowNetwork?: boolean;
+}
+
 export interface RunCommandResult {
   command: string;
   args?: string[];
@@ -327,6 +339,9 @@ export interface RunCommandResult {
   stderr: string;
   durationMs?: number;
   timedOut?: boolean;
+  policyLevel?: CommandPolicyLevel;
+  deniedReason?: string;
+  approvalId?: string;
 }
 
 export interface RunCommandInput {
@@ -335,6 +350,7 @@ export interface RunCommandInput {
   cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  commandPolicy?: CommandPolicy;
 }
 
 export interface WorkspaceDriver {
@@ -369,6 +385,7 @@ export interface ToolContext {
   approvalsRepo?: { createApproval(input: Omit<Approval, "id" | "requestedAt" | "createdAt" | "status"> & { id?: string; status?: ApprovalStatus }): Promise<Approval>; listApprovalsByRun(): Promise<Approval[]> };
   modelMode: ModelMode;
   allowCommands?: boolean;
+  commandPolicy?: CommandPolicy;
   hasApproval?: (action: string) => boolean | Promise<boolean>;
   requestApproval?: (approval: Omit<Approval, "id" | "runId" | "requestedAt" | "createdAt" | "status" | "notes"> & { notes?: string }) => Promise<Approval>;
 }
@@ -444,6 +461,7 @@ export interface AgentContext {
   runId: string;
   goal: string;
   domainSpec: DomainSpec;
+  repoContext?: RepoContextSummary;
   modelProvider: ModelProvider;
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
@@ -473,6 +491,7 @@ export interface AgentStep {
   outputType: ArtifactType;
   requiredInputs: ArtifactType[];
   reviewRequired: boolean;
+  timeoutMs?: number;
   contextPolicy?: ContextPolicy;
   execute(context: AgentContext): Promise<AgentStepResult>;
 }
@@ -480,6 +499,25 @@ export interface AgentStep {
 export interface ValidationResult {
   ok: boolean;
   failures: string[];
+}
+
+export interface RepoFileSummary {
+  path: string;
+  kind: "manifest" | "config" | "source" | "test" | "doc" | "other";
+  language?: string;
+  sizeBytes: number;
+}
+
+export interface RepoContextSummary {
+  rootPath: string;
+  generatedAt: string;
+  fileCount: number;
+  truncated: boolean;
+  packageManagers: string[];
+  frameworks: string[];
+  languages: string[];
+  importantFiles: RepoFileSummary[];
+  warnings: string[];
 }
 
 export interface RunSummary {
