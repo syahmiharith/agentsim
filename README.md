@@ -352,8 +352,6 @@ The public near-term path is:
 2. local workspace execution loop
 3. web artifact viewer
 
-See [docs/milestones.md](docs/milestones.md) for the detailed roadmap.
-
 ## License
 
 Agentsim is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

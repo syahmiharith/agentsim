@@ -39,7 +39,6 @@ documentation:
           - "CODE_OF_CONDUCT.md"
           - "SECURITY.md"
           - "SUPPORT.md"
-          - "docs/**"
           - "AGENTS.md"
 
 github:

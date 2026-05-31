@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 outputs/
+docs/
 
 # Private local planning
 docs/private/
