@@ -1,5 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import { validateAppSpec } from "../app-spec/app-spec-validation.js";
+import type { GeneratedAppValidation } from "./generated-app-validation.js";
 import type { AgentActionRecord, AgentMessageRecord, Artifact, ContextEvaluation, ContextPackage, DomainPack, ValidationResult } from "../types.js";
 import { validateContextPackage } from "./context.js";
 import { sha256 } from "./hash.js";
@@ -139,6 +141,8 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   const contextPackages = await validateContextPackages(input.finalPackageDir, failures);
   await validateContextEvaluation(input.finalPackageDir, failures);
   await validateAgentActions(input.finalPackageDir, artifactsById, messageIds, contextPackages, failures);
+  await validateAppSpecTrace(input.finalPackageDir, failures);
+  await validateAppValidationTrace(input.finalPackageDir, failures);
   await validateDomainInferenceTrace(input.finalPackageDir, failures);
   await validateWorkflowGraphTrace(input.finalPackageDir, failures);
   await validateToolRegistryTrace(input.finalPackageDir, failures);
@@ -147,7 +151,7 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
 
   return {
     ok: failures.length === 0,
-    failures
+    failures,
   };
 }
 
@@ -157,13 +161,7 @@ async function validateTracePrivacy(finalPackageDir: string, privatePathPrefixes
     return;
   }
 
-  const candidates = [
-    finalPackageDir,
-    dirname(finalPackageDir),
-    dirname(dirname(finalPackageDir)),
-    process.cwd(),
-    ...privatePathPrefixes
-  ];
+  const candidates = [finalPackageDir, dirname(finalPackageDir), dirname(dirname(finalPackageDir)), process.cwd(), ...privatePathPrefixes];
   const privateValues = createPrivatePathValues(candidates);
   if (privateValues.length === 0) {
     return;
@@ -180,10 +178,12 @@ async function validateTracePrivacy(finalPackageDir: string, privatePathPrefixes
 
 async function listTraceFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = join(root, entry.name);
-    return entry.isDirectory() ? listTraceFiles(path) : [path];
-  }));
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(root, entry.name);
+      return entry.isDirectory() ? listTraceFiles(path) : [path];
+    }),
+  );
   return files.flat();
 }
 
@@ -305,12 +305,73 @@ async function validateDomainInferenceTrace(finalPackageDir: string, failures: s
   }
 }
 
+async function validateAppSpecTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const appSpecPath = join(finalPackageDir, "trace", "app-spec.json");
+  if (!(await pathExists(appSpecPath))) {
+    return;
+  }
+
+  try {
+    const appSpec = JSON.parse(await readFile(appSpecPath, "utf8"));
+    const validation = validateAppSpec(appSpec);
+    failures.push(...validation.failures.map((failure) => `AppSpec trace ${failure}`));
+  } catch {
+    failures.push("AppSpec trace is not valid JSON");
+  }
+}
+
+async function validateAppValidationTrace(finalPackageDir: string, failures: string[]): Promise<void> {
+  const appValidationPath = join(finalPackageDir, "trace", "app-validation.json");
+  if (!(await pathExists(appValidationPath))) {
+    return;
+  }
+
+  let appValidation: GeneratedAppValidation;
+  try {
+    appValidation = JSON.parse(await readFile(appValidationPath, "utf8")) as GeneratedAppValidation;
+  } catch {
+    failures.push("Generated app validation trace is not valid JSON");
+    return;
+  }
+
+  if (appValidation.schemaVersion !== 1) {
+    failures.push("Generated app validation trace schemaVersion must be 1");
+  }
+  if (typeof appValidation.ok !== "boolean") {
+    failures.push("Generated app validation trace ok must be boolean");
+  }
+  if (typeof appValidation.message !== "string" || appValidation.message.trim().length === 0) {
+    failures.push("Generated app validation trace is missing message");
+  }
+  if (!Array.isArray(appValidation.checks) || appValidation.checks.length === 0) {
+    failures.push("Generated app validation trace checks must not be empty");
+  } else {
+    for (const check of appValidation.checks) {
+      if (typeof check.id !== "string" || check.id.trim().length === 0) {
+        failures.push("Generated app validation trace contains a check without id");
+      }
+      if (check.status !== "passed" && check.status !== "failed") {
+        failures.push(`Generated app validation trace check ${check.id ?? "unknown"} has invalid status`);
+      }
+      if (check.status === "failed") {
+        failures.push(`Generated app validation trace check ${check.id} failed`);
+      }
+      if (typeof check.message !== "string" || check.message.trim().length === 0) {
+        failures.push(`Generated app validation trace check ${check.id ?? "unknown"} is missing message`);
+      }
+    }
+  }
+  if (!appValidation.ok) {
+    failures.push("Generated app validation trace reports ok: false");
+  }
+}
+
 async function validateAgentActions(
   finalPackageDir: string,
   artifactsById: Map<string, Artifact>,
   messageIds: Set<string>,
   contextPackages: ContextPackage[],
-  failures: string[]
+  failures: string[],
 ): Promise<void> {
   const actionPath = join(finalPackageDir, "trace", "agent-actions.json");
   if (!(await pathExists(actionPath))) {
@@ -391,10 +452,7 @@ async function validateAgentActions(
   }
 }
 
-async function validateContextPackages(
-  finalPackageDir: string,
-  failures: string[]
-): Promise<ContextPackage[]> {
+async function validateContextPackages(finalPackageDir: string, failures: string[]): Promise<ContextPackage[]> {
   const contextPath = join(finalPackageDir, "trace", "context-packages.json");
   if (!(await pathExists(contextPath))) {
     return [];
@@ -456,7 +514,7 @@ async function validateAgentMessages(
   finalPackageDir: string,
   artifactsById: Map<string, Artifact>,
   agentIds: Set<string>,
-  failures: string[]
+  failures: string[],
 ): Promise<Set<string>> {
   const messagePath = join(finalPackageDir, "trace", "agent-messages.json");
   const messageIds = new Set<string>();

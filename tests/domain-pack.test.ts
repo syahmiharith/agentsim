@@ -11,28 +11,34 @@ describe("softwareFreelancePack", () => {
       "software-architect",
       "builder",
       "reviewer-qa",
-      "delivery"
+      "delivery",
     ]);
-    expect(softwareFreelancePack.requiredFinalPackageFiles).toEqual(expect.arrayContaining([
-      "client/project-summary.md",
-      "client/handoff-notes.md",
-      "client/user-guide.md",
-      "planning/requirements.md",
-      "technical/architecture.md",
-      "review/qa-report.md",
-      "app/package.json",
-      "app/src/App.tsx"
-    ]));
-    expect(softwareFreelancePack.requiredTraceFiles).toEqual(expect.arrayContaining([
-      "trace/events.jsonl",
-      "trace/agent-messages.json",
-      "trace/agent-actions.json",
-      "trace/context-packages.json",
-      "trace/context-eval.json",
-      "trace/decisions.json",
-      "trace/approvals.json",
-      "trace/artifact-lineage.json"
-    ]));
+    expect(softwareFreelancePack.requiredFinalPackageFiles).toEqual(
+      expect.arrayContaining([
+        "client/project-summary.md",
+        "client/handoff-notes.md",
+        "client/user-guide.md",
+        "planning/requirements.md",
+        "technical/architecture.md",
+        "review/qa-report.md",
+        "app/package.json",
+        "app/src/App.tsx",
+      ]),
+    );
+    expect(softwareFreelancePack.requiredTraceFiles).toEqual(
+      expect.arrayContaining([
+        "trace/events.jsonl",
+        "trace/agent-messages.json",
+        "trace/agent-actions.json",
+        "trace/context-packages.json",
+        "trace/context-eval.json",
+        "trace/decisions.json",
+        "trace/approvals.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/artifact-lineage.json",
+      ]),
+    );
   });
 
   it.each([
@@ -40,7 +46,7 @@ describe("softwareFreelancePack", () => {
     ["Build a booking system for a barber shop", "Barber Booking Desk", "Booking", "Confirmed"],
     ["Build a clinic appointment system", "Clinic Appointment Desk", "Appointment", "Scheduled"],
     ["Build a restaurant reservation system", "Restaurant Reservation Desk", "Reservation", "Seated"],
-    ["Build an equipment checkout system for a university club", "Club Equipment Checkout", "Checkout", "Overdue"]
+    ["Build an equipment checkout system for a university club", "Club Equipment Checkout", "Checkout", "Overdue"],
   ])("infers distinct software freelance package content for %s", (goal, appName, entityName, status) => {
     const spec = softwareFreelancePack.inferDomainSpec(goal);
 

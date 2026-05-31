@@ -28,36 +28,36 @@ Agentsim is alpha, pre-1.0 software. The current repo is a CLI proof of concept 
 
 Current capability:
 
-* run a local CLI workflow from a high-level client request
-* generate planning, technical, review, client handoff, trace, and app prototype files
-* run in deterministic mock mode without provider keys
-* persist run, task, artifact, event, message, and approval state under each run
-* inspect workflow graph, artifacts, context, tools, and static viewer output from the CLI
-* import optional read-only repo context for local package generation
-* inspect and resume local runs from the CLI after approvals are resolved
-* run a deterministic mock eval suite across several freelance software prompts
-* use a model-agnostic Chat Completions-compatible provider in live mode when configured
+- run a local CLI workflow from a high-level client request
+- generate planning, technical, review, client handoff, trace, and app prototype files
+- run in deterministic mock mode without provider keys
+- persist run, task, artifact, event, message, and approval state under each run
+- inspect workflow graph, artifacts, context, tools, and static viewer output from the CLI
+- import optional read-only repo context for local package generation
+- inspect and resume local runs from the CLI after approvals are resolved
+- run a deterministic mock eval suite across several freelance software prompts
+- use a model-agnostic Chat Completions-compatible provider in live mode when configured
 
 Current limitations:
 
-* generated apps are simple prototypes and still need human review before client delivery
-* the workflow is tuned for the first software-freelance demo, not arbitrary domains
-* approvals, workspace execution, command execution, repair loops, and provider routing are still early
-* the workflow graph is local-first; it is not a distributed scheduler
-* command execution is disabled by default and requires both approval and explicit opt-in
-* no hosted service, dashboard, or production deployment automation exists yet
+- generated apps are simple prototypes and still need human review before client delivery
+- the workflow is tuned for the first software-freelance demo, not arbitrary domains
+- approvals, workspace execution, command execution, repair loops, and provider routing are still early
+- the workflow graph is local-first; it is not a distributed scheduler
+- command execution is disabled by default and requires both approval and explicit opt-in
+- no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
 
 Solo software freelancers often do the work of a small software team by themselves:
 
-* clarifying vague client requests
-* defining scope and risks
-* choosing architecture
-* building prototypes
-* testing and reviewing delivery quality
-* writing handoff notes
-* preserving decisions for later changes
+- clarifying vague client requests
+- defining scope and risks
+- choosing architecture
+- building prototypes
+- testing and reviewing delivery quality
+- writing handoff notes
+- preserving decisions for later changes
 
 Large teams have process, specialists, review loops, and delivery discipline. Solo developers usually have scattered notes, a chat window, and a lot of project context they must keep in their head.
 
@@ -105,6 +105,8 @@ outputs/{runId}/final-package/
     +-- agent-messages.json
     +-- agent-actions.json
     +-- decisions.json
+    +-- app-spec.json
+    +-- app-validation.json
     +-- workflow-graph.json
     +-- tool-registry.json
     +-- artifact-lineage.json
@@ -114,12 +116,14 @@ The v0 demo is intentionally small. It validates the core workflow before the pr
 
 For the flower-company inventory example, a useful run should produce artifacts such as:
 
-* `planning/requirements.md` describing request creation, list viewing, status updates, and admin needs
-* `technical/architecture.md` explaining the simple local app structure and data model
-* `review/qa-report.md` checking whether the generated package matches the scoped requirements
-* `trace/events.jsonl` showing the workflow events that led to the final package
-* `trace/agent-messages.json` showing structured task assignments, handoffs, and review requests between agents
-* `trace/agent-actions.json` showing each role-owned action, input artifacts, output artifact, model/source, and status
+- `planning/requirements.md` describing request creation, list viewing, status updates, and admin needs
+- `technical/architecture.md` explaining the simple local app structure and data model
+- `review/qa-report.md` checking whether the generated package matches the scoped requirements
+- `trace/events.jsonl` showing the workflow events that led to the final package
+- `trace/agent-messages.json` showing structured task assignments, handoffs, and review requests between agents
+- `trace/agent-actions.json` showing each role-owned action, input artifacts, output artifact, model/source, and status
+- `trace/app-spec.json` recording the deterministic runnable app contract used by the renderer
+- `trace/app-validation.json` recording structured generated-app validation checks
 
 ## Design Principles
 
@@ -127,12 +131,12 @@ Agentsim is not trying to be a foundation model, a cloud IDE, or a generic agent
 
 The project is built around a few principles:
 
-* Artifacts are more useful than chat transcripts.
-* Review loops are safer than unchecked generation.
-* Important decisions should be traceable.
-* Domain-specific workflows are more useful than generic agent swarms.
-* High-risk actions should require human approval.
-* Model providers should be replaceable.
+- Artifacts are more useful than chat transcripts.
+- Review loops are safer than unchecked generation.
+- Important decisions should be traceable.
+- Domain-specific workflows are more useful than generic agent swarms.
+- High-risk actions should require human approval.
+- Model providers should be replaceable.
 
 The goal is to make AI-assisted software delivery easier to inspect, review, and continue over time.
 
@@ -140,21 +144,23 @@ The goal is to make AI-assisted software delivery easier to inspect, review, and
 
 Agentsim currently has a CLI-based proof of concept:
 
-* TypeScript CLI
-* local filesystem workspace
-* mock mode for deterministic no-key runs
-* model-agnostic live provider mode through the Chat Completions-compatible `ModelProvider` boundary
-* artifact-producing agent steps for intake, planning, architecture, implementation, QA, and delivery
-* durable artifact generation
-* artifact lineage, decision logs, approval records, and event traces
-* runnable generated app package for the first software-freelance workflow
+- TypeScript CLI
+- local filesystem workspace
+- mock mode for deterministic no-key runs
+- model-agnostic live provider mode through the Chat Completions-compatible `ModelProvider` boundary
+- artifact-producing agent steps for intake, planning, architecture, implementation, QA, and delivery
+- durable artifact generation
+- artifact lineage, decision logs, approval records, and event traces
+- AppSpec-driven runnable generated app package for prompt-specific single-entity `crud-workflow` prototypes
+
+The current generated app contract is intentionally narrow: M1 supports one primary entity, local JSON persistence, a CRUD form/list, and status workflow updates. Broader archetypes such as booking calendars, inventory balance math, live schema extraction, and multi-entity relations are sequenced for later milestones.
 
 ## Quickstart
 
 ### Requirements
 
-* Node.js 20.11+
-* pnpm
+- Node.js 20.11+
+- pnpm
 
 Install dependencies:
 
@@ -262,40 +268,40 @@ pnpm eval:mock
 
 Useful entry points:
 
-* `src/cli.ts` - CLI command surface
-* `src/workflow.ts` - compatibility wrapper for the orchestrator
-* `src/orchestrator.ts` - run, resume, scheduler, validation, and approval orchestration
-* `src/types.ts` - core contracts
-* `src/agents/` - role definitions and artifact-producing step registry
-* `src/core/` - artifacts, events, hashing, redaction, path safety, repositories, scheduler, tools, and workspace behavior
-* `src/providers/` - model provider boundary
-* `src/templates/` - generated delivery package templates
-* `tests/` - workflow, CLI, hashing, and redaction coverage
+- `src/cli.ts` - CLI command surface
+- `src/workflow.ts` - compatibility wrapper for the orchestrator
+- `src/orchestrator.ts` - run, resume, scheduler, validation, and approval orchestration
+- `src/types.ts` - core contracts
+- `src/agents/` - role definitions and artifact-producing step registry
+- `src/core/` - artifacts, events, hashing, redaction, path safety, repositories, scheduler, tools, and workspace behavior
+- `src/providers/` - model provider boundary
+- `src/templates/` - generated delivery package templates
+- `tests/` - workflow, CLI, hashing, and redaction coverage
 
 ## Project Model
 
 Agentsim is currently built around these concepts:
 
-* `Agent`
-* `AgentStep`
-* `TaskRun`
-* `Run`
-* `Task`
-* `Artifact`
-* `Workspace`
-* `Decision`
-* `Approval`
-* `Event`
+- `Agent`
+- `AgentStep`
+- `TaskRun`
+- `Run`
+- `Task`
+- `Artifact`
+- `Workspace`
+- `Decision`
+- `Approval`
+- `Event`
 
 Planned contracts include:
 
-* `Organization`
-* `Project`
-* `DomainPack`
-* `WorkspaceDriver`
-* `ModelProvider`
-* `ArtifactStore`
-* `EventStore`
+- `Organization`
+- `Project`
+- `DomainPack`
+- `WorkspaceDriver`
+- `ModelProvider`
+- `ArtifactStore`
+- `EventStore`
 
 The current orchestrator compiles the existing `AgentStep` registry into persisted tasks, marks dependency-ready tasks, records task lifecycle events, supports approval pause/resume, and keeps the existing final package contract intact. Tools execute through permission-aware wrappers, with dangerous actions requiring approval and explicit command opt-in before execution.
 
@@ -309,29 +315,29 @@ The best contributions right now improve the current vertical slice instead of w
 
 Who should contribute:
 
-* developers interested in practical CLI tools and local-first workflows
-* people who care about artifact quality, review loops, and traceability
-* freelancers or technical reviewers who can identify gaps in handoff packages
-* contributors willing to keep changes small, testable, and aligned with the current scope
+- developers interested in practical CLI tools and local-first workflows
+- people who care about artifact quality, review loops, and traceability
+- freelancers or technical reviewers who can identify gaps in handoff packages
+- contributors willing to keep changes small, testable, and aligned with the current scope
 
 High-impact areas:
 
-* make the CLI demo more reliable across different software project prompts
-* add artifact validation for final package completeness
-* improve the generated app quality without bloating the demo
-* strengthen QA review artifacts and known-issues reporting
-* extend the local workspace driver with safe command execution
-* improve trace files so every run is easier to inspect and debug
-* add domain-pack boundaries only where they make the software-freelance workflow cleaner
+- make the CLI demo more reliable across different software project prompts
+- add artifact validation for final package completeness
+- improve the generated app quality without bloating the demo
+- strengthen QA review artifacts and known-issues reporting
+- extend the local workspace driver with safe command execution
+- improve trace files so every run is easier to inspect and debug
+- add domain-pack boundaries only where they make the software-freelance workflow cleaner
 
 Please avoid starting with:
 
-* full web dashboards
-* agent marketplaces
-* complex persistent memory
-* Docker-per-agent infrastructure
-* SaaS account systems
-* generic multi-agent chat UI
+- full web dashboards
+- agent marketplaces
+- complex persistent memory
+- Docker-per-agent infrastructure
+- SaaS account systems
+- generic multi-agent chat UI
 
 The project needs contributors who want to make one narrow workflow genuinely useful before making the system broad.
 

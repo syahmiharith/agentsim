@@ -3,13 +3,25 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { getAgent } from "./agents/agents.js";
 import { agentSteps as defaultAgentSteps } from "./agents/steps.js";
+import { appSpecFromDomainSpec } from "./app-spec/app-spec-from-domain.js";
+import type { AppSpec } from "./app-spec/app-spec.js";
+import { validateAppSpec } from "./app-spec/app-spec-validation.js";
 import { FileArtifactStore } from "./core/artifacts.js";
 import { assembleContextPackage, evaluateContextPackages, validateContextPackage } from "./core/context.js";
 import { CompositeEventStore, JsonlEventStore } from "./core/events.js";
 import { validateFinalPackage as defaultValidateFinalPackage } from "./core/final-package-validation.js";
+import { validateGeneratedApp, type GeneratedAppValidation } from "./core/generated-app-validation.js";
 import { safeJoin } from "./core/paths.js";
 import { redactSecrets } from "./core/redact.js";
-import { LocalAgentActionsRepo, LocalApprovalsRepo, LocalArtifactsRepo, LocalContextPackagesRepo, LocalMessagesRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
+import {
+  LocalAgentActionsRepo,
+  LocalApprovalsRepo,
+  LocalArtifactsRepo,
+  LocalContextPackagesRepo,
+  LocalMessagesRepo,
+  LocalRunsRepo,
+  LocalTasksRepo,
+} from "./core/repositories.js";
 import { createFixTask, reviewResultFromValidation } from "./core/review-loop.js";
 import { resolveCommandPolicy } from "./core/command-policy.js";
 import { scanRepoContext } from "./core/repo-context.js";
@@ -45,7 +57,7 @@ import type {
   Task,
   TaskRun,
   Workspace,
-  WorkspaceDriver
+  WorkspaceDriver,
 } from "./types.js";
 
 export interface RunDemoOptions {
@@ -65,6 +77,7 @@ export interface RunDemoResult {
   artifacts: Artifact[];
   decisions: Decision[];
   domainSpec: DomainSpec;
+  appSpec: AppSpec;
 }
 
 export interface RunOrchestratorOptions extends RunDemoOptions {
@@ -97,6 +110,8 @@ interface OrchestratorRuntime {
   modelProvider: ModelProvider;
   domainPack: DomainPack;
   domainSpec: DomainSpec;
+  appSpec: AppSpec;
+  appValidation?: GeneratedAppValidation;
   domainInference: DomainInferenceResult;
   repoContext?: RepoContextSummary;
   workflowGraph: WorkflowGraph;
@@ -134,11 +149,11 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const traceRedactionInput = (): TraceRedactionInput => ({
     workspace,
     repoRoot: repoContext?.rootPath,
-    extraPaths: [process.cwd(), resolve(outputRoot)]
+    extraPaths: [process.cwd(), resolve(outputRoot)],
   });
   const eventStore = new CompositeEventStore(runId, [
     new JsonlEventStore(runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl"), (event) => redactTraceValue(event, traceRedactionInput())),
-    new JsonlEventStore(runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
+    new JsonlEventStore(runId, safeJoin(workspace.rootDir, "state/events.jsonl")),
   ]);
   const artifactStore = new FileArtifactStore(workspace);
   const runsRepo = new LocalRunsRepo(workspace.rootDir);
@@ -151,6 +166,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const domainPack = options.domainPack ?? softwareFreelancePack;
   const domainInference = inferWithMetadata(domainPack, safeGoal);
   const domainSpec = domainInference.spec;
+  const appSpec = deriveValidAppSpec(domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
   const decisions: Decision[] = [];
@@ -164,7 +180,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     startedAt: new Date().toISOString(),
     status: "RUNNING",
     modelMode: options.modelProvider.mode,
-    outputDir: workspace.rootDir
+    outputDir: workspace.rootDir,
   };
   let workflowGraph: WorkflowGraph;
   try {
@@ -180,12 +196,12 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
       outputRoot: workspace.rootDir,
       createdAt: taskRun.startedAt,
       updatedAt: new Date().toISOString(),
-      failureReason: message
+      failureReason: message,
     });
     await eventStore.append({
       level: "error",
       name: "run.failed",
-      message
+      message,
     });
     throw error;
   }
@@ -196,6 +212,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     modelProvider: options.modelProvider,
     domainPack,
     domainSpec,
+    appSpec,
     domainInference,
     repoContext,
     workflowGraph,
@@ -220,7 +237,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
     allowCommands: options.allowCommands ?? false,
     enableRepairLoop: options.enableRepairLoop ?? false,
-    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1)
+    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1),
   };
 
   try {
@@ -237,7 +254,8 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
         finalPackageDir: workspace.finalPackageDir,
         artifacts: artifactStore.list(),
         decisions,
-        domainSpec
+        domainSpec,
+        appSpec,
       };
     }
 
@@ -254,7 +272,7 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
       await eventStore.append({
         level: "error",
         name: "run.failed",
-        message: error instanceof Error ? error.message : "Unknown run failure."
+        message: error instanceof Error ? error.message : "Unknown run failure.",
       });
     }
     throw error;
@@ -284,11 +302,11 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const traceRedactionInput = (): TraceRedactionInput => ({
     workspace,
     repoRoot: repoContext?.rootPath,
-    extraPaths: [process.cwd(), resolve(outputRoot)]
+    extraPaths: [process.cwd(), resolve(outputRoot)],
   });
   const eventStore = new CompositeEventStore(options.runId, [
     new JsonlEventStore(options.runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl"), (event) => redactTraceValue(event, traceRedactionInput())),
-    new JsonlEventStore(options.runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
+    new JsonlEventStore(options.runId, safeJoin(workspace.rootDir, "state/events.jsonl")),
   ]);
   const tasksRepo = new LocalTasksRepo(runRoot);
   const artifactsRepo = new LocalArtifactsRepo(runRoot);
@@ -300,6 +318,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const domainPack = options.domainPack ?? softwareFreelancePack;
   const domainSpec = await loadPersistedDomainSpec(runRoot, domainPack, existingRun.userGoal);
   const domainInference = await loadPersistedDomainInference(runRoot, domainPack, existingRun.userGoal, domainSpec);
+  const appSpec = await loadPersistedAppSpec(runRoot, domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const workflowGraph = await loadPersistedWorkflowGraph(runRoot, options.runId, steps);
   const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
@@ -323,7 +342,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
       madeBy: "system",
       title: "Domain inference",
       rationale: `Inferred ${domainSpec.domain} from the persisted user goal and selected ${domainSpec.primaryEntity.name} as the primary workflow entity.`,
-      selectedOption: domainSpec.appName
+      selectedOption: domainSpec.appName,
     },
     {
       id: "model-provider",
@@ -332,8 +351,8 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
       madeBy: "system",
       title: "Model provider selection",
       rationale: "Resumed an existing local run with the configured model provider.",
-      selectedOption: options.modelProvider.mode
-    }
+      selectedOption: options.modelProvider.mode,
+    },
   ];
   const agentActions = await agentActionsRepo.listActionsByRun();
   const agentMessages = await messagesRepo.listMessagesByRun();
@@ -345,6 +364,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     modelProvider: options.modelProvider,
     domainPack,
     domainSpec,
+    appSpec,
     domainInference,
     repoContext,
     workflowGraph,
@@ -369,7 +389,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     validateFinalPackage: options.validateFinalPackage ?? defaultValidateFinalPackage,
     allowCommands: options.allowCommands ?? false,
     enableRepairLoop: options.enableRepairLoop ?? false,
-    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1)
+    maxConcurrentTasks: Math.max(1, options.maxConcurrentTasks ?? 1),
   };
 
   const taskRun: TaskRun = {
@@ -378,13 +398,13 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     startedAt: existingRun.createdAt,
     status: "RUNNING",
     modelMode: options.modelProvider.mode,
-    outputDir: workspace.rootDir
+    outputDir: workspace.rootDir,
   };
 
   await eventStore.append({
     level: "info",
     name: "run.resumed",
-    message: `Resumed Agentsim run ${options.runId}.`
+    message: `Resumed Agentsim run ${options.runId}.`,
   });
 
   try {
@@ -398,7 +418,8 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
         finalPackageDir: workspace.finalPackageDir,
         artifacts: artifactStore.list(),
         decisions,
-        domainSpec
+        domainSpec,
+        appSpec,
       };
     }
     taskRun.status = "FAILED";
@@ -415,7 +436,7 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
     finalPackageDir: runtime.workspace.finalPackageDir,
     artifacts: runtime.artifactStore.list(),
     domainPack: runtime.domainPack,
-    privatePathPrefixes: privateTracePathPrefixes(runtime)
+    privatePathPrefixes: privateTracePathPrefixes(runtime),
   });
   let reviewResult = reviewResultFromValidation(validationResult);
 
@@ -426,7 +447,7 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
         runId: runtime.runId,
         reviewTask,
         reviewResult,
-        reviewCycle: reviewTask.reviewCycle ?? 1
+        reviewCycle: reviewTask.reviewCycle ?? 1,
       });
       await runtime.tasksRepo.createTask(fixTask);
       await runtime.eventStore.append({
@@ -434,14 +455,14 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
         name: "review.fix_task_created",
         taskId: fixTask.id,
         message: "Created a bounded fix task from validation review.",
-        data: { requiredFixes: reviewResult.requiredFixes }
+        data: { requiredFixes: reviewResult.requiredFixes },
       });
       await executeFixTask(runtime, fixTask, validationResult.failures);
       validationResult = await runtime.validateFinalPackage({
         finalPackageDir: runtime.workspace.finalPackageDir,
         artifacts: runtime.artifactStore.list(),
         domainPack: runtime.domainPack,
-        privatePathPrefixes: privateTracePathPrefixes(runtime)
+        privatePathPrefixes: privateTracePathPrefixes(runtime),
       });
       reviewResult = reviewResultFromValidation(validationResult);
     }
@@ -451,23 +472,26 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
     taskRun.status = "REVIEW_FAILED";
     taskRun.failureReason = "VALIDATION_FAILED";
     taskRun.completedAt = new Date().toISOString();
-    await writeRunSummary({
-      runId: runtime.runId,
-      goal: runtime.safeGoal,
-      status: taskRun.status,
-      modelMode: taskRun.modelMode,
-      provider: runtime.modelProvider.name,
-      finalPackageDir: runtime.workspace.finalPackageDir,
-      artifactCount: runtime.artifactStore.list().length,
-      validationResult,
-      failures: validationResult.failures
-    }, runtime);
+    await writeRunSummary(
+      {
+        runId: runtime.runId,
+        goal: runtime.safeGoal,
+        status: taskRun.status,
+        modelMode: taskRun.modelMode,
+        provider: runtime.modelProvider.name,
+        finalPackageDir: runtime.workspace.finalPackageDir,
+        artifactCount: runtime.artifactStore.list().length,
+        validationResult,
+        failures: validationResult.failures,
+      },
+      runtime,
+    );
     if (reviewResult.verdict === "revise") {
       await runtime.eventStore.append({
         level: "warn",
         name: "review.repair_loop_disabled",
         message: "Validation produced recoverable review failures, but repair loop is disabled.",
-        data: { reviewResult }
+        data: { reviewResult },
       });
     }
     await failRun(runtime, "VALIDATION_FAILED", reviewResult.summary, { failures: validationResult.failures, reviewResult });
@@ -477,24 +501,27 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
   taskRun.status = "COMPLETED";
   taskRun.completedAt = new Date().toISOString();
   await runtime.runsRepo.updateRunStatus("completed");
-  await writeRunSummary({
-    runId: runtime.runId,
-    goal: runtime.safeGoal,
-    status: taskRun.status,
-    modelMode: taskRun.modelMode,
-    provider: runtime.modelProvider.name,
-    finalPackageDir: runtime.workspace.finalPackageDir,
-    artifactCount: runtime.artifactStore.list().length,
-    validationResult,
-    failures: []
-  }, runtime);
+  await writeRunSummary(
+    {
+      runId: runtime.runId,
+      goal: runtime.safeGoal,
+      status: taskRun.status,
+      modelMode: taskRun.modelMode,
+      provider: runtime.modelProvider.name,
+      finalPackageDir: runtime.workspace.finalPackageDir,
+      artifactCount: runtime.artifactStore.list().length,
+      validationResult,
+      failures: [],
+    },
+    runtime,
+  );
   await runtime.eventStore.append({
     level: "info",
     name: "run.completed",
     agentId: "delivery",
     artifactId: runtime.artifactsByType["handoff-notes"]?.id,
     message: "Completed Agentsim demo run.",
-    data: { finalPackageDir: runtime.workspace.finalPackageDir }
+    data: { finalPackageDir: runtime.workspace.finalPackageDir },
   });
 
   return {
@@ -502,7 +529,8 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
     finalPackageDir: runtime.workspace.finalPackageDir,
     artifacts: runtime.artifactStore.list(),
     decisions: runtime.decisions,
-    domainSpec: runtime.domainSpec
+    domainSpec: runtime.domainSpec,
+    appSpec: runtime.appSpec,
   };
 }
 
@@ -516,7 +544,7 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
     taskId: task.id,
     agentId: "builder",
     message: "Started deterministic repair task.",
-    data: { failures }
+    data: { failures },
   });
 
   const applied: string[] = [];
@@ -526,8 +554,17 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       applied.push("trace/domain-spec.json");
     }
 
+    if (failures.some((failure) => failure.includes("trace/app-spec.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/app-spec.json"), JSON.stringify(runtime.appSpec, null, 2), "utf8");
+      applied.push("trace/app-spec.json");
+    }
+
     if (failures.some((failure) => failure.includes("trace/domain-inference.json"))) {
-      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
+      await writeFile(
+        safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"),
+        JSON.stringify(traceDomainInference(runtime.domainInference), null, 2),
+        "utf8",
+      );
       applied.push("trace/domain-inference.json");
     }
 
@@ -537,8 +574,8 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
           runId: runtime.runId,
           packages: runtime.contextPackages,
           actions: runtime.agentActions,
-          artifacts: runtime.artifactStore.list()
-        })
+          artifacts: runtime.artifactStore.list(),
+        }),
       });
       applied.push("trace/context-eval.json");
     }
@@ -558,11 +595,19 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       applied.push("trace/artifact-lineage.json");
     }
 
+    if (failures.some((failure) => failure.includes("trace/app-validation.json"))) {
+      runtime.appValidation = await validateGeneratedApp(runtime.workspace.finalPackageDir, runtime.appSpec);
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/app-validation.json"), JSON.stringify(runtime.appValidation, null, 2), "utf8");
+      applied.push("trace/app-validation.json");
+    }
+
     if (failures.some((failure) => failure.includes("app/"))) {
-      for (const [relativePath, content] of Object.entries(renderGeneratedAppFiles(runtime.workspace, runtime.domainSpec))) {
+      for (const [relativePath, content] of Object.entries(renderGeneratedAppFiles(runtime.workspace, runtime.appSpec))) {
         await writeFile(safeJoin(runtime.workspace.finalPackageDir, relativePath), content, "utf8");
         await runtime.workspaceDriver.writeFile(runtime.workspace, relativePath, content);
       }
+      runtime.appValidation = await validateGeneratedApp(runtime.workspace.finalPackageDir, runtime.appSpec);
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/app-validation.json"), JSON.stringify(runtime.appValidation, null, 2), "utf8");
       applied.push("app/");
     }
 
@@ -591,7 +636,7 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       taskId: task.id,
       agentId: "builder",
       message: "Applied deterministic repair actions.",
-      data: { applied }
+      data: { applied },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown repair failure.";
@@ -602,7 +647,7 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       taskId: task.id,
       agentId: "builder",
       message,
-      data: { failures }
+      data: { failures },
     });
   }
 }
@@ -632,8 +677,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     data: {
       kind: task.kind,
       dependsOn: task.dependsOn,
-      outputArtifactType: task.outputArtifactType
-    }
+      outputArtifactType: task.outputArtifactType,
+    },
   });
 
   const missingInputs = step.requiredInputs.filter((type) => !runtime.artifactsByType[type]);
@@ -650,7 +695,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     to: step.ownerAgentId,
     outputType: step.outputType,
     reviewRequired: step.reviewRequired,
-    inputArtifacts: step.requiredInputs.map((type) => runtime.artifactsByType[type]).filter(isArtifact)
+    inputArtifacts: step.requiredInputs.map((type) => runtime.artifactsByType[type]).filter(isArtifact),
   });
 
   for (const message of currentMessages) {
@@ -668,8 +713,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
         to: message.to,
         stepId: message.stepId,
         artifactType: message.artifactType,
-        expectedOutput: message.expectedOutput
-      }
+        expectedOutput: message.expectedOutput,
+      },
     });
   }
   assertTaskAttemptActive(attempt);
@@ -685,7 +730,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     messages: currentMessages,
     decisions: runtime.decisions,
     approvals: await runtime.approvalsRepo.listApprovalsByRun(),
-    policy: step.contextPolicy
+    policy: step.contextPolicy,
   });
   const contextValidation = validateContextPackage(contextPackage);
   if (!contextValidation.ok) {
@@ -695,7 +740,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
       agentId: step.ownerAgentId,
       taskId: task.id,
       message: `Context package validation failed for ${task.id}.`,
-      data: { failures: contextValidation.failures }
+      data: { failures: contextValidation.failures },
     });
     return { status: "failed", error: `Context package validation failed: ${contextValidation.failures.join("; ")}` };
   }
@@ -708,6 +753,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     runId: runtime.runId,
     goal: runtime.safeGoal,
     domainSpec: runtime.domainSpec,
+    appSpec: runtime.appSpec,
     repoContext: runtime.repoContext,
     modelProvider: runtime.modelProvider,
     workspace: runtime.workspace,
@@ -730,9 +776,10 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
       commandPolicy: runtime.commandPolicy,
       abortSignal: attempt?.abortSignal,
       hasApproval: (action) => hasApprovedAction(action, runtime.approvalsRepo),
-      requestApproval: (approval) => requestToolApproval(runtime.runId, runtime.approvalsRepo, { ...approval, taskId: approval.taskId ?? task.id })
+      requestApproval: (approval) => requestToolApproval(runtime.runId, runtime.approvalsRepo, { ...approval, taskId: approval.taskId ?? task.id }),
     }),
-    currentMessages
+    currentMessages,
+    appValidation: runtime.appValidation,
   };
   assertTaskAttemptActive(attempt);
 
@@ -748,8 +795,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
       requiredInputs: step.requiredInputs,
       reviewRequired: step.reviewRequired,
       contextPackageId: contextPackage.id,
-      contextHash: contextPackage.contextHash
-    }
+      contextHash: contextPackage.contextHash,
+    },
   });
 
   const actionRecord: AgentActionRecord = {
@@ -767,11 +814,14 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     modelMode: runtime.modelProvider.mode,
     provider: runtime.modelProvider.name,
     reviewRequired: step.reviewRequired,
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
   };
 
   try {
     const stepResult = await step.execute(context);
+    if (context.appValidation) {
+      runtime.appValidation = context.appValidation;
+    }
     assertTaskAttemptActive(attempt);
     const artifact = await createArtifact({
       artifactStore: runtime.artifactStore,
@@ -788,7 +838,7 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
       contextHash: contextPackage.contextHash,
       status: stepResult.status,
       reviewStatus: stepResult.reviewStatus,
-      approvalStatus: stepResult.approvalStatus
+      approvalStatus: stepResult.approvalStatus,
     });
     assertTaskAttemptActive(attempt);
 
@@ -811,8 +861,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
         model: stepResult.model,
         contextPackageId: contextPackage.id,
         contextHash: contextPackage.contextHash,
-        summary: stepResult.actionSummary
-      }
+        summary: stepResult.actionSummary,
+      },
     });
 
     return { status: "completed", artifact, actionRecord, messages: currentMessages };
@@ -821,16 +871,17 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
       return { status: "failed", error: error instanceof Error ? redactSecrets(error.message) : "Task attempt aborted." };
     }
     if (error instanceof ToolApprovalRequiredError) {
-      const existing = (await runtime.approvalsRepo.listApprovalsByRun())
-        .find((approval) => approval.action === error.action && approval.status === "pending");
-      const approval = existing ?? await runtime.approvalsRepo.createApproval({
-        runId: runtime.runId,
-        taskId: task.id,
-        requestedBy: step.ownerAgentId,
-        action: error.action,
-        riskLevel: "high",
-        notes: error.message
-      });
+      const existing = (await runtime.approvalsRepo.listApprovalsByRun()).find((approval) => approval.action === error.action && approval.status === "pending");
+      const approval =
+        existing ??
+        (await runtime.approvalsRepo.createApproval({
+          runId: runtime.runId,
+          taskId: task.id,
+          requestedBy: step.ownerAgentId,
+          action: error.action,
+          riskLevel: "high",
+          notes: error.message,
+        }));
       return { status: "waiting_for_approval", approvalId: approval.id };
     }
 
@@ -846,8 +897,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
         stepId: step.id,
         action: step.action,
         outputType: step.outputType,
-        error: actionRecord.error
-      }
+        error: actionRecord.error,
+      },
     });
     return { status: "failed", error: actionRecord.error };
   }
@@ -870,8 +921,8 @@ export async function handleTaskResult(runtime: OrchestratorRuntime, taskId: str
       message: `Task ${taskId} completed.`,
       data: {
         outputArtifactType: result.artifact.type,
-        outputArtifactId: result.artifact.id
-      }
+        outputArtifactId: result.artifact.id,
+      },
     });
     const tasks = markReadyTasks(await runtime.tasksRepo.listTasksByRun());
     await runtime.tasksRepo.saveTasks(tasks);
@@ -886,7 +937,7 @@ export async function handleTaskResult(runtime: OrchestratorRuntime, taskId: str
       name: "run.waiting_for_approval",
       taskId,
       message: `Run is waiting for approval ${result.approvalId}.`,
-      data: { approvalId: result.approvalId }
+      data: { approvalId: result.approvalId },
     });
     throw new RunWaitingForApprovalError(result.approvalId);
   }
@@ -909,7 +960,7 @@ export async function retryOrFailTask(runtime: OrchestratorRuntime, taskId: stri
       agentId: task.assignedAgentId,
       taskId,
       message: `Task ${taskId} will retry.`,
-      data: { attempts: task.attempts, maxAttempts: task.maxAttempts, error: message }
+      data: { attempts: task.attempts, maxAttempts: task.maxAttempts, error: message },
     });
     return;
   }
@@ -931,12 +982,17 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
     modelMode: runtime.modelProvider.mode,
     outputRoot: runtime.workspace.rootDir,
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
 
   await runtime.runsRepo.createRun(runState);
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
+  await writeFile(safeJoin(runtime.workspace.rootDir, "state/app-spec.json"), JSON.stringify(runtime.appSpec, null, 2), "utf8");
+  await writeFile(
+    safeJoin(runtime.workspace.rootDir, "state/domain-inference.json"),
+    JSON.stringify(traceDomainInference(runtime.domainInference), null, 2),
+    "utf8",
+  );
   await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.rootDir, "state/workflow-graph.json"));
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/tool-registry.json"), JSON.stringify(builtInToolRegistry, null, 2), "utf8");
   if (runtime.repoContext) {
@@ -955,11 +1011,12 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
       appName: runtime.domainSpec.appName,
       domain: runtime.domainSpec.domain,
       primaryEntity: runtime.domainSpec.primaryEntity.name,
+      appArchetype: runtime.appSpec.appArchetype,
       matchedPresetId: runtime.domainInference.matchedPresetId,
       confidence: runtime.domainInference.confidence,
       needsClarification: runtime.domainInference.needsClarification,
-      fallbackUsed: runtime.domainInference.fallbackUsed
-    }
+      fallbackUsed: runtime.domainInference.fallbackUsed,
+    },
   });
 
   runtime.decisions.push({
@@ -969,7 +1026,7 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
     madeBy: "system",
     title: "Domain inference",
     rationale: `Inferred ${runtime.domainSpec.domain} from the user goal and selected ${runtime.domainSpec.primaryEntity.name} as the primary workflow entity.`,
-    selectedOption: runtime.domainSpec.appName
+    selectedOption: runtime.domainSpec.appName,
   });
   runtime.decisions.push({
     id: "model-provider",
@@ -977,10 +1034,11 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
     madeAt: new Date().toISOString(),
     madeBy: "system",
     title: "Model provider selection",
-    rationale: runtime.modelProvider.mode === "mock"
-      ? "No live model key was required; deterministic mock mode keeps the demo and tests reproducible."
-      : "A live Chat Completions-compatible provider was configured for this run.",
-    selectedOption: runtime.modelProvider.mode
+    rationale:
+      runtime.modelProvider.mode === "mock"
+        ? "No live model key was required; deterministic mock mode keeps the demo and tests reproducible."
+        : "A live Chat Completions-compatible provider was configured for this run.",
+    selectedOption: runtime.modelProvider.mode,
   });
 }
 
@@ -992,12 +1050,12 @@ async function maybeCreateLiveRunBrief(runtime: OrchestratorRuntime): Promise<vo
   await runtime.eventStore.append({
     level: "info",
     name: "model.run_brief.started",
-    message: "Requesting live model run brief."
+    message: "Requesting live model run brief.",
   });
   const runBrief = await runtime.modelProvider.generate({
     system: "You are the planning coordinator for Agentsim. Return concise Markdown only.",
     prompt: `Create a brief execution note for this freelance software delivery goal: ${runtime.safeGoal}`,
-    purpose: "run-brief"
+    purpose: "run-brief",
   });
   runtime.decisions.push({
     id: "live-model-brief",
@@ -1006,13 +1064,13 @@ async function maybeCreateLiveRunBrief(runtime: OrchestratorRuntime): Promise<vo
     madeBy: "system",
     title: "Live model run brief",
     rationale: "The live provider was exercised before deterministic package assembly.",
-    selectedOption: runBrief.model
+    selectedOption: runBrief.model,
   });
   await runtime.eventStore.append({
     level: "info",
     name: "model.run_brief.completed",
     message: "Live model run brief completed.",
-    data: { model: runBrief.model, contentLength: runBrief.content.length }
+    data: { model: runBrief.model, contentLength: runBrief.content.length },
   });
 }
 
@@ -1044,8 +1102,9 @@ async function runSchedulerLoop(runtime: OrchestratorRuntime): Promise<void> {
       throw new Error("Task graph is blocked by a failed dependency.");
     }
 
-    const readyTasks = getReadyTasks(tasks)
-      .sort((left, right) => (stepOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (stepOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+    const readyTasks = getReadyTasks(tasks).sort(
+      (left, right) => (stepOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (stepOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    );
     const readyBatch = selectReadyTaskBatch(readyTasks, runtime.maxConcurrentTasks);
 
     if (readyBatch.length === 0) {
@@ -1053,10 +1112,12 @@ async function runSchedulerLoop(runtime: OrchestratorRuntime): Promise<void> {
       throw new Error("No ready tasks remain, but the run is not complete.");
     }
 
-    const results = await Promise.all(readyBatch.map(async (task) => ({
-      taskId: task.id,
-      result: await executeTaskWithTimeout(runtime, task)
-    })));
+    const results = await Promise.all(
+      readyBatch.map(async (task) => ({
+        taskId: task.id,
+        result: await executeTaskWithTimeout(runtime, task),
+      })),
+    );
     for (const { taskId, result } of results) {
       await handleTaskResult(runtime, taskId, result);
     }
@@ -1089,7 +1150,7 @@ async function executeTaskWithTimeout(runtime: OrchestratorRuntime, task: Task):
   const attempt: TaskExecutionAttempt = {
     id: attemptId,
     abortSignal: abortController.signal,
-    isActive: () => active
+    isActive: () => active,
   };
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -1106,10 +1167,10 @@ async function executeTaskWithTimeout(runtime: OrchestratorRuntime, task: Task):
             agentId: task.assignedAgentId,
             taskId: task.id,
             message: `Task ${task.id} timed out after ${timeoutMs}ms.`,
-            data: { timeoutMs, taskAttemptId: attemptId }
+            data: { timeoutMs, taskAttemptId: attemptId },
           });
         }, timeoutMs);
-      })
+      }),
     ]);
   } finally {
     active = false;
@@ -1147,7 +1208,7 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
     madeBy: "system",
     title: "Approval mode",
     rationale: "The v0 demo resolves artifact approvals inside the local pipeline after review-required steps pass.",
-    selectedOption: "auto-approve"
+    selectedOption: "auto-approve",
   });
 
   const approvals: Approval[] = runtime.artifactStore.list().map((artifact) => ({
@@ -1158,7 +1219,7 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
     resolvedAt: artifact.updatedAt,
     status: artifact.approvalStatus,
     approver: "auto",
-    notes: "Auto-approved by the v0 demo pipeline."
+    notes: "Auto-approved by the v0 demo pipeline.",
   }));
   for (const approval of approvals) {
     await runtime.approvalsRepo.createApproval(approval);
@@ -1166,6 +1227,10 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   const traceApprovals = mergeApprovalsById(await runtime.approvalsRepo.listApprovalsByRun());
 
   await writeTraceJson(runtime, "trace/domain-spec.json", runtime.domainSpec);
+  await writeTraceJson(runtime, "trace/app-spec.json", runtime.appSpec);
+  if (runtime.appValidation) {
+    await writeTraceJson(runtime, "trace/app-validation.json", runtime.appValidation);
+  }
   await writeTraceJson(runtime, "trace/domain-inference.json", traceDomainInference(runtime.domainInference));
   await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.finalPackageDir, "trace/workflow-graph.json"));
   await writeTraceJson(runtime, "trace/tool-registry.json", builtInToolRegistry);
@@ -1182,8 +1247,8 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
       runId: runtime.runId,
       packages: runtime.contextPackages,
       actions: runtime.agentActions,
-      artifacts: runtime.artifactStore.list()
-    })
+      artifacts: runtime.artifactStore.list(),
+    }),
   });
   await writeTraceJson(runtime, "trace/artifact-lineage.json", { artifacts: runtime.artifactStore.list() });
 }
@@ -1203,16 +1268,12 @@ function getTraceRedactionInput(runtime: OrchestratorRuntime): TraceRedactionInp
   return {
     workspace: runtime.workspace,
     repoRoot: runtime.repoContext?.rootPath,
-    extraPaths: privateTracePathPrefixes(runtime)
+    extraPaths: privateTracePathPrefixes(runtime),
   };
 }
 
 function privateTracePathPrefixes(runtime: OrchestratorRuntime): string[] {
-  return [
-    process.cwd(),
-    dirname(runtime.workspace.rootDir),
-    runtime.repoContext?.rootPath
-  ].filter((path): path is string => Boolean(path));
+  return [process.cwd(), dirname(runtime.workspace.rootDir), runtime.repoContext?.rootPath].filter((path): path is string => Boolean(path));
 }
 
 async function createArtifact(input: {
@@ -1247,7 +1308,7 @@ async function createArtifact(input: {
     reviewStatus: input.reviewStatus,
     approvalStatus: input.approvalStatus,
     status: input.status,
-    prompt
+    prompt,
   });
 
   await input.eventStore.append({
@@ -1261,8 +1322,8 @@ async function createArtifact(input: {
       finalPackagePath: input.finalPackagePath,
       inputArtifactIds: input.inputArtifactIds ?? [],
       contextPackageId: input.contextPackageId,
-      contextHash: input.contextHash
-    }
+      contextHash: input.contextHash,
+    },
   });
 
   return artifact;
@@ -1274,7 +1335,7 @@ async function failRun(runtime: OrchestratorRuntime, failureReason: string, mess
     level: "error",
     name: failureReason === "VALIDATION_FAILED" ? "run.validation_failed" : "run.failed",
     message,
-    data
+    data,
   });
 }
 
@@ -1299,6 +1360,17 @@ async function loadPersistedDomainSpec(runRoot: string, domainPack: DomainPack, 
     return JSON.parse(await readFile(safeJoin(runRoot, "state/domain-spec.json"), "utf8")) as DomainSpec;
   } catch {
     return domainPack.inferDomainSpec(goal);
+  }
+}
+
+async function loadPersistedAppSpec(runRoot: string, domainSpec: DomainSpec): Promise<AppSpec> {
+  try {
+    const persisted = JSON.parse(await readFile(safeJoin(runRoot, "state/app-spec.json"), "utf8")) as AppSpec;
+    return assertValidAppSpec(persisted);
+  } catch {
+    const derived = deriveValidAppSpec(domainSpec);
+    await writeFile(safeJoin(runRoot, "state/app-spec.json"), JSON.stringify(derived, null, 2), "utf8");
+    return derived;
   }
 }
 
@@ -1339,8 +1411,20 @@ function inferWithMetadata(domainPack: DomainPack, goal: string): DomainInferenc
     matchedKeywords: [],
     warnings: ["Domain pack does not expose inference metadata."],
     needsClarification: false,
-    fallbackUsed: false
+    fallbackUsed: false,
   };
+}
+
+function deriveValidAppSpec(domainSpec: DomainSpec): AppSpec {
+  return assertValidAppSpec(appSpecFromDomainSpec(domainSpec));
+}
+
+function assertValidAppSpec(appSpec: AppSpec): AppSpec {
+  const validation = validateAppSpec(appSpec);
+  if (!validation.ok) {
+    throw new Error(`AppSpec validation failed: ${validation.failures.join("; ")}`);
+  }
+  return appSpec;
 }
 
 function traceDomainInference(result: DomainInferenceResult): Omit<DomainInferenceResult, "spec"> {
@@ -1350,7 +1434,7 @@ function traceDomainInference(result: DomainInferenceResult): Omit<DomainInferen
     matchedKeywords: result.matchedKeywords,
     warnings: result.warnings,
     needsClarification: result.needsClarification,
-    fallbackUsed: result.fallbackUsed
+    fallbackUsed: result.fallbackUsed,
   };
 }
 
@@ -1378,17 +1462,19 @@ function createAgentMessages(input: {
   const now = new Date().toISOString();
 
   if (input.inputArtifacts.length === 0) {
-    return [{
-      id: randomUUID(),
-      runId: input.runId,
-      type: "task.assignment",
-      from: "orchestrator",
-      to: input.to,
-      stepId: input.stepId,
-      question: `Produce ${input.outputType} for the current client goal.`,
-      expectedOutput: input.action,
-      createdAt: now
-    }];
+    return [
+      {
+        id: randomUUID(),
+        runId: input.runId,
+        type: "task.assignment",
+        from: "orchestrator",
+        to: input.to,
+        stepId: input.stepId,
+        question: `Produce ${input.outputType} for the current client goal.`,
+        expectedOutput: input.action,
+        createdAt: now,
+      },
+    ];
   }
 
   return input.inputArtifacts.map((artifact) => ({
@@ -1400,13 +1486,11 @@ function createAgentMessages(input: {
     stepId: input.stepId,
     artifactId: artifact.id,
     artifactType: artifact.type,
-    question: input.reviewRequired
-      ? `Review ${artifact.type} for blockers before ${input.action}.`
-      : `Use ${artifact.type} as input for ${input.action}.`,
+    question: input.reviewRequired ? `Review ${artifact.type} for blockers before ${input.action}.` : `Use ${artifact.type} as input for ${input.action}.`,
     expectedOutput: input.reviewRequired
       ? "List blocking issues only, or pass the artifact if acceptable."
       : `Produce ${input.outputType} using the provided artifact context.`,
-    createdAt: now
+    createdAt: now,
   }));
 }
 

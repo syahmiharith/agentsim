@@ -19,48 +19,46 @@ const artifactManifest: ArtifactManifestItem[] = [
   manifest("app", "Runnable app", "builder", "app/", true, true),
   manifest("qa-report", "QA report", "reviewer-qa", "review/qa-report.md", true, true),
   manifest("code-review", "Code review", "reviewer-qa", "review/code-review.md", true, true),
-  manifest("known-issues", "Known issues", "reviewer-qa", "review/known-issues.md", true, true)
+  manifest("known-issues", "Known issues", "reviewer-qa", "review/known-issues.md", true, true),
 ];
 
 const requiredFinalPackageFiles = [
-  ...artifactManifest
-    .filter((artifact) => artifact.required && artifact.finalPackagePath !== "app/")
-    .map((artifact) => artifact.finalPackagePath),
+  ...artifactManifest.filter((artifact) => artifact.required && artifact.finalPackagePath !== "app/").map((artifact) => artifact.finalPackagePath),
   "app/package.json",
   "app/index.html",
   "app/server.js",
   "app/src/App.tsx",
   "app/src/main.tsx",
   "app/src/styles.css",
-  "app/README.md"
+  "app/README.md",
 ];
 
 const reviewRubric: ReviewRubricCriterion[] = [
   {
     id: "requirements-complete",
     label: "Requirement completeness",
-    description: "The package captures the core workflow, fields, users, assumptions, and constraints from the client goal."
+    description: "The package captures the core workflow, fields, users, assumptions, and constraints from the client goal.",
   },
   {
     id: "scope-realistic",
     label: "Scope realism",
-    description: "The MVP boundaries are clear enough for a solo freelancer to hand off or estimate."
+    description: "The MVP boundaries are clear enough for a solo freelancer to hand off or estimate.",
   },
   {
     id: "app-runnable",
     label: "Runnable prototype",
-    description: "The generated app includes local run instructions and the expected app files."
+    description: "The generated app includes local run instructions and the expected app files.",
   },
   {
     id: "handoff-useful",
     label: "Handoff usefulness",
-    description: "Client-facing and developer-facing notes explain what was built, how to review it, and what remains."
+    description: "Client-facing and developer-facing notes explain what was built, how to review it, and what remains.",
   },
   {
     id: "traceable",
     label: "Traceability",
-    description: "Events, decisions, approvals, and artifact lineage make the run inspectable."
-  }
+    description: "Events, decisions, approvals, and artifact lineage make the run inspectable.",
+  },
 ];
 
 export const softwareFreelancePack: DomainPack = {
@@ -79,13 +77,15 @@ export const softwareFreelancePack: DomainPack = {
     "trace/approvals.json",
     "trace/decisions.json",
     "trace/domain-spec.json",
+    "trace/app-spec.json",
+    "trace/app-validation.json",
     "trace/workflow-graph.json",
     "trace/tool-registry.json",
-    "trace/artifact-lineage.json"
+    "trace/artifact-lineage.json",
   ],
   reviewRubric,
   inferDomainSpec,
-  inferDomainSpecResult
+  inferDomainSpecResult,
 };
 
 function manifest(
@@ -94,7 +94,7 @@ function manifest(
   ownerAgentId: ArtifactManifestItem["ownerAgentId"],
   finalPackagePath: string,
   required = true,
-  reviewRequired = false
+  reviewRequired = false,
 ): ArtifactManifestItem {
   return { type, title, ownerAgentId, finalPackagePath, required, reviewRequired };
 }

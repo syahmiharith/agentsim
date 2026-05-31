@@ -1,4 +1,6 @@
 import type { DomainSpec } from "./domain/domain-spec.js";
+import type { AppSpec } from "./app-spec/app-spec.js";
+import type { GeneratedAppValidation } from "./core/generated-app-validation.js";
 import type { DomainInferenceResult } from "./domain/domain-inference.js";
 
 export type ArtifactStatus = "draft" | "reviewed" | "approved" | "rejected" | "superseded" | "exported" | "failed";
@@ -44,22 +46,9 @@ export type TaskRunStatus =
   | "FAILED"
   | "CANCELLED";
 
-export type FailureReason =
-  | "FAILED_MODEL_CALL"
-  | "FAILED_TOOL_CALL"
-  | "FAILED_REVIEW"
-  | "TIMEOUT"
-  | "BUDGET_EXCEEDED"
-  | "VALIDATION_FAILED"
-  | "UNKNOWN";
+export type FailureReason = "FAILED_MODEL_CALL" | "FAILED_TOOL_CALL" | "FAILED_REVIEW" | "TIMEOUT" | "BUDGET_EXCEEDED" | "VALIDATION_FAILED" | "UNKNOWN";
 
-export type AgentRole =
-  | "client-intake"
-  | "scope-pm"
-  | "software-architect"
-  | "builder"
-  | "reviewer-qa"
-  | "delivery";
+export type AgentRole = "client-intake" | "scope-pm" | "software-architect" | "builder" | "reviewer-qa" | "delivery";
 
 export type ArtifactType =
   | "proposal"
@@ -385,7 +374,10 @@ export interface ToolContext {
   eventStore?: EventStore;
   artifactStore?: ArtifactStore;
   artifactsRepo?: { createArtifactRecord(artifact: Artifact): Promise<Artifact> };
-  approvalsRepo?: { createApproval(input: Omit<Approval, "id" | "requestedAt" | "createdAt" | "status"> & { id?: string; status?: ApprovalStatus }): Promise<Approval>; listApprovalsByRun(): Promise<Approval[]> };
+  approvalsRepo?: {
+    createApproval(input: Omit<Approval, "id" | "requestedAt" | "createdAt" | "status"> & { id?: string; status?: ApprovalStatus }): Promise<Approval>;
+    listApprovalsByRun(): Promise<Approval[]>;
+  };
   modelMode: ModelMode;
   allowCommands?: boolean;
   commandPolicy?: CommandPolicy;
@@ -465,6 +457,7 @@ export interface AgentContext {
   runId: string;
   goal: string;
   domainSpec: DomainSpec;
+  appSpec: AppSpec;
   repoContext?: RepoContextSummary;
   modelProvider: ModelProvider;
   workspace: Workspace;
@@ -473,7 +466,7 @@ export interface AgentContext {
   contextPackage?: ContextPackage;
   tools?: ToolRuntime;
   currentMessages?: AgentMessageRecord[];
-  appValidation?: { ok: boolean; message: string };
+  appValidation?: GeneratedAppValidation;
   abortSignal?: AbortSignal;
 }
 

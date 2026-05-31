@@ -1,4 +1,5 @@
 import type { DomainSpec, FieldSpec } from "../domain/domain-spec.js";
+import type { GeneratedAppValidation } from "../core/generated-app-validation.js";
 import type { RepoContextSummary } from "../types.js";
 
 export function titleFromGoal(goal: string): string {
@@ -75,13 +76,13 @@ ${spec.appName} is the local prototype package for the ${spec.domain} workflow.
 ## Functional Requirements
 
 ${bulletList([
-    `Create ${spec.primaryEntity.name.toLowerCase()} records with ${joinHuman(spec.primaryEntity.fields.map((field) => field.label.toLowerCase()))}.`,
-    `View all submitted ${spec.primaryEntity.pluralName.toLowerCase()} in a scannable list.`,
-    `Filter or visually distinguish ${spec.primaryEntity.pluralName.toLowerCase()} by status.`,
-    `Update ${spec.primaryEntity.name.toLowerCase()} status through ${joinHuman(spec.workflowStatuses)}.`,
-    "Persist data locally for demo use.",
-    "Provide setup and run instructions for a developer handoff."
-  ])}
+  `Create ${spec.primaryEntity.name.toLowerCase()} records with ${joinHuman(spec.primaryEntity.fields.map((field) => field.label.toLowerCase()))}.`,
+  `View all submitted ${spec.primaryEntity.pluralName.toLowerCase()} in a scannable list.`,
+  `Filter or visually distinguish ${spec.primaryEntity.pluralName.toLowerCase()} by status.`,
+  `Update ${spec.primaryEntity.name.toLowerCase()} status through ${joinHuman(spec.workflowStatuses)}.`,
+  "Persist data locally for demo use.",
+  "Provide setup and run instructions for a developer handoff.",
+])}
 
 ## Required Fields
 
@@ -103,12 +104,12 @@ export function scope(spec: DomainSpec): string {
 ## In Scope
 
 ${bulletList([
-    `Local prototype for the ${spec.domain} lifecycle.`,
-    `${spec.screens[0]?.name ?? `New ${spec.primaryEntity.name}`} form.`,
-    `${spec.primaryEntity.name} list and status updates.`,
-    `${spec.screens.at(-1)?.name ?? "Admin"} behavior in the same app shell.`,
-    "Local JSON-backed API and Vite React frontend."
-  ])}
+  `Local prototype for the ${spec.domain} lifecycle.`,
+  `${spec.screens[0]?.name ?? `New ${spec.primaryEntity.name}`} form.`,
+  `${spec.primaryEntity.name} list and status updates.`,
+  `${spec.screens.at(-1)?.name ?? "Admin"} behavior in the same app shell.`,
+  "Local JSON-backed API and Vite React frontend.",
+])}
 
 ## Out of Scope
 
@@ -128,11 +129,11 @@ export function assumptions(spec: DomainSpec): string {
   return `# Assumptions
 
 ${bulletList([
-    "The client needs a workflow prototype before committing to production integrations.",
-    "Local persistence is acceptable for MVP demonstration.",
-    "Target users can share one local app for the first review.",
-    ...spec.assumptions
-  ])}
+  "The client needs a workflow prototype before committing to production integrations.",
+  "Local persistence is acceptable for MVP demonstration.",
+  "Target users can share one local app for the first review.",
+  ...spec.assumptions,
+])}
 `;
 }
 
@@ -158,13 +159,13 @@ export function risks(spec: DomainSpec): string {
   return `# Risks
 
 ${bulletList([
-    `The real ${spec.domain} workflow may require approvals, permissions, or domain-specific fields not captured in the MVP.`,
-    "Local JSON persistence is not safe for production multi-user use.",
-    "Without authentication, the prototype should not be exposed publicly.",
-    "Status options may need adjustment after client review.",
-    "Production deployment will require a database, access control, backups, and monitoring.",
-    ...spec.risks
-  ])}
+  `The real ${spec.domain} workflow may require approvals, permissions, or domain-specific fields not captured in the MVP.`,
+  "Local JSON persistence is not safe for production multi-user use.",
+  "Without authentication, the prototype should not be exposed publicly.",
+  "Status options may need adjustment after client review.",
+  "Production deployment will require a database, access control, backups, and monitoring.",
+  ...spec.risks,
+])}
 `;
 }
 
@@ -236,18 +237,25 @@ export function taskBreakdown(spec: DomainSpec): string {
   return `# Task Breakdown
 
 ${bulletList([
-    `Define ${spec.primaryEntity.name.toLowerCase()} fields and status values.`,
-    "Build local API with JSON persistence.",
-    `Build React ${spec.primaryEntity.name.toLowerCase()} form and list view.`,
-    "Add status update controls.",
-    "Add empty, loading, and error states.",
-    "Write setup and run instructions.",
-    "Run package QA and document known issues."
-  ])}
+  `Define ${spec.primaryEntity.name.toLowerCase()} fields and status values.`,
+  "Build local API with JSON persistence.",
+  `Build React ${spec.primaryEntity.name.toLowerCase()} form and list view.`,
+  "Add status update controls.",
+  "Add empty, loading, and error states.",
+  "Write setup and run instructions.",
+  "Run package QA and document known issues.",
+])}
 `;
 }
 
-export function qaReport(appValidation: string): string {
+export function qaReport(appValidation?: GeneratedAppValidation | string): string {
+  const validationSummary =
+    typeof appValidation === "string"
+      ? appValidation
+      : appValidation
+        ? `${appValidation.message}\n\n${validationTable(appValidation)}`
+        : "Generated app validation did not run.";
+
   return `# QA Report
 
 ## Checks Performed
@@ -255,16 +263,22 @@ export function qaReport(appValidation: string): string {
 - Verified required final-package directories are generated.
 - Verified core planning and technical artifacts are present.
 - Verified generated app includes package metadata, source files, local API, and README.
+- Verified generated app AppSpec terms, workflow statuses, package scripts, and seed data.
 - Verified event trace and artifact lineage are exported.
 
 ## Generated App Validation
 
-${appValidation}
+${validationSummary}
 
 ## Result
 
 The package is suitable for a first client review demo. Production hardening is intentionally out of scope.
 `;
+}
+
+function validationTable(appValidation: GeneratedAppValidation): string {
+  const rows = appValidation.checks.map((check) => `| ${check.id} | ${check.status} | ${check.message} |`);
+  return ["| Check | Status | Detail |", "|---|---|---|", ...rows].join("\n");
 }
 
 export function codeReview(spec: DomainSpec): string {
@@ -410,7 +424,12 @@ function unionType(values: string[]): string {
 }
 
 function typeName(value: string): string {
-  return value.replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+  return value
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
 }
 
 function article(value: string): string {

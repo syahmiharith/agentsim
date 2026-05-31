@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { appSpecFromDomainSpec } from "../src/app-spec/app-spec-from-domain.js";
 import { inferDomainSpec, inferDomainSpecResult } from "../src/domain/mock-domain-spec.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { scoreEvalRun, summarizeEvalResults } from "../src/evals/scoring.js";
@@ -34,16 +35,21 @@ describe("eval scoring", () => {
 
   it("records optional domain inference metadata without hard-gating it", async () => {
     const inference = inferDomainSpecResult("Build an inventory request system for a flower company");
-    const result = await scoreEvalRun(inference.spec.sourceGoal, "run", await createEvalFixture(inference.spec, {
-      traceDomainInference: {
-        matchedPresetId: inference.matchedPresetId,
-        confidence: inference.confidence,
-        matchedKeywords: inference.matchedKeywords,
-        warnings: inference.warnings,
-        needsClarification: inference.needsClarification,
-        fallbackUsed: inference.fallbackUsed
-      }
-    }), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      inference.spec.sourceGoal,
+      "run",
+      await createEvalFixture(inference.spec, {
+        traceDomainInference: {
+          matchedPresetId: inference.matchedPresetId,
+          confidence: inference.confidence,
+          matchedKeywords: inference.matchedKeywords,
+          warnings: inference.warnings,
+          needsClarification: inference.needsClarification,
+          fallbackUsed: inference.fallbackUsed,
+        },
+      }),
+      { durationMs: 1 },
+    );
 
     expect(result.domainInferencePresent).toBe(true);
     expect(result.domainMatchedPresetId).toBe("inventory-request");
@@ -59,11 +65,13 @@ describe("eval scoring", () => {
 
     expect(result.domainSpecPresent).toBe(true);
     expect(result.failureCategory).toBe("domain_mismatch");
-    expect(result.failures).toContainEqual(expect.objectContaining({
-      code: "domain_app_name_mismatch",
-      actual: "Client Request Tracker",
-      expected: "Inventory Request Desk"
-    }));
+    expect(result.failures).toContainEqual(
+      expect.objectContaining({
+        code: "domain_app_name_mismatch",
+        actual: "Client Request Tracker",
+        expected: "Inventory Request Desk",
+      }),
+    );
   });
 
   it("fails when required trace files are missing", async () => {
@@ -75,64 +83,82 @@ describe("eval scoring", () => {
     expect(result.contextCoverageOk).toBe(false);
     expect(result.contextProvenanceOk).toBe(false);
     expect(result.failureCategory).toBe("missing_trace_file");
-    expect(result.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "trace_file_missing", path: "trace/context-eval.json" }),
-      expect.objectContaining({ code: "context_eval_missing", path: "trace/context-eval.json" })
-    ]));
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "trace_file_missing", path: "trace/context-eval.json" }),
+        expect.objectContaining({ code: "context_eval_missing", path: "trace/context-eval.json" }),
+      ]),
+    );
   });
 
   it("fails when context eval reports coverage or provenance failures", async () => {
     const spec = inferDomainSpec("Build a clinic appointment system");
-    const result = await scoreEvalRun(spec.sourceGoal, "run", await createEvalFixture(spec, {
-      contextEvaluation: {
-        runId: "run",
-        generatedAt: "2026-05-31T00:00:00.000Z",
-        packageCount: 1,
-        actionCount: 1,
-        artifactCount: 1,
-        totalItemCount: 1,
-        totalChars: 20,
-        requiredCoverageOk: false,
-        provenanceOk: false,
-        failures: ["action context hash mismatch"]
-      }
-    }), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      spec.sourceGoal,
+      "run",
+      await createEvalFixture(spec, {
+        contextEvaluation: {
+          runId: "run",
+          generatedAt: "2026-05-31T00:00:00.000Z",
+          packageCount: 1,
+          actionCount: 1,
+          artifactCount: 1,
+          totalItemCount: 1,
+          totalChars: 20,
+          requiredCoverageOk: false,
+          provenanceOk: false,
+          failures: ["action context hash mismatch"],
+        },
+      }),
+      { durationMs: 1 },
+    );
 
     expect(result.contextCoverageOk).toBe(false);
     expect(result.contextProvenanceOk).toBe(false);
     expect(result.failureCategory).toBe("context");
-    expect(result.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "context_coverage_failed" }),
-      expect.objectContaining({ code: "context_provenance_failed" }),
-      expect.objectContaining({ code: "context_eval_failure", message: "Context evaluation failure: action context hash mismatch" })
-    ]));
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "context_coverage_failed" }),
+        expect.objectContaining({ code: "context_provenance_failed" }),
+        expect.objectContaining({ code: "context_eval_failure", message: "Context evaluation failure: action context hash mismatch" }),
+      ]),
+    );
   });
 
   it("fails when app output omits expected fields and statuses", async () => {
     const spec = inferDomainSpec("Build a restaurant reservation system");
-    const result = await scoreEvalRun(spec.sourceGoal, "run", await createEvalFixture(spec, {
-      appSource: `export const appConfig = ${JSON.stringify({
-        appName: spec.appName,
-        primaryEntityName: spec.primaryEntity.name,
-        fields: [],
-        statuses: []
-      })};`
-    }), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      spec.sourceGoal,
+      "run",
+      await createEvalFixture(spec, {
+        appSource: `export const appConfig = ${JSON.stringify({
+          appName: spec.appName,
+          primaryEntityName: spec.primaryEntity.name,
+          fields: [],
+          statuses: [],
+        })};`,
+      }),
+      { durationMs: 1 },
+    );
 
     expect(result.workflowStatusesAppearInApp).toBe(false);
     expect(result.requiredFieldsAppearInApp).toBe(false);
     expect(result.failureCategory).toBe("domain_mismatch");
-    expect(result.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "workflow_statuses_missing" }),
-      expect.objectContaining({ code: "required_fields_missing" })
-    ]));
+    expect(result.failures).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "workflow_statuses_missing" }), expect.objectContaining({ code: "required_fields_missing" })]),
+    );
   });
 
   it("fails when stale generic or template text leaks into generated output", async () => {
     const spec = inferDomainSpec("Build an equipment checkout system for a university club");
-    const result = await scoreEvalRun(spec.sourceGoal, "run", await createEvalFixture(spec, {
-      appReadme: `# ${spec.appName}\n\nTODO: Replace Client Request Tracker template placeholder.`
-    }), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      spec.sourceGoal,
+      "run",
+      await createEvalFixture(spec, {
+        appReadme: `# ${spec.appName}\n\nTODO: Replace Client Request Tracker template placeholder.`,
+      }),
+      { durationMs: 1 },
+    );
 
     expect(result.templateLeakageDetected).toBe(true);
     expect(result.failureCategory).toBe("runtime");
@@ -141,12 +167,17 @@ describe("eval scoring", () => {
 
   it("records command coverage and optional command warnings without failing the hard gate", async () => {
     const spec = inferDomainSpec("Build an inventory request system for a flower company");
-    const result = await scoreEvalRun(createEvalCase(spec, {
-      commands: [
-        { command: "node --version", cwd: ".", timeoutMs: 5_000 },
-        { command: "node -e \"process.exit(2)\"", cwd: ".", timeoutMs: 5_000, optional: true }
-      ]
-    }), "run", await createEvalFixture(spec), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      createEvalCase(spec, {
+        commands: [
+          { command: "node --version", cwd: ".", timeoutMs: 5_000 },
+          { command: 'node -e "process.exit(2)"', cwd: ".", timeoutMs: 5_000, optional: true },
+        ],
+      }),
+      "run",
+      await createEvalFixture(spec),
+      { durationMs: 1 },
+    );
 
     expect(result.hardGatePassed).toBe(true);
     expect(result.commandChecksRun).toBe(2);
@@ -159,20 +190,27 @@ describe("eval scoring", () => {
 
   it("classifies generated API behavior failures separately", async () => {
     const spec = inferDomainSpec("Build a clinic appointment system");
-    const result = await scoreEvalRun(createEvalCase(spec), "run", await createEvalFixture(spec, {
-      serverSource: "export {};\n"
-    }), { durationMs: 1 });
+    const result = await scoreEvalRun(
+      createEvalCase(spec),
+      "run",
+      await createEvalFixture(spec, {
+        serverSource: "export {};\n",
+      }),
+      { durationMs: 1 },
+    );
 
     expect(result.apiBehaviorPresent).toBe(false);
     expect(result.seedDataPresent).toBe(true);
     expect(result.hardGatePassed).toBe(false);
     expect(result.failureCategory).toBe("api_behavior");
-    expect(result.failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "api_health_missing" }),
-      expect.objectContaining({ code: "api_list_missing" }),
-      expect.objectContaining({ code: "api_create_missing" }),
-      expect.objectContaining({ code: "api_status_update_missing" })
-    ]));
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "api_health_missing" }),
+        expect.objectContaining({ code: "api_list_missing" }),
+        expect.objectContaining({ code: "api_create_missing" }),
+        expect.objectContaining({ code: "api_status_update_missing" }),
+      ]),
+    );
   });
 });
 
@@ -186,7 +224,7 @@ async function createEvalFixture(
     appReadme?: string;
     serverSource?: string;
     traceDomainInference?: unknown;
-  } = {}
+  } = {},
 ): Promise<RunDemoResult> {
   const finalPackageDir = join(tmpdir(), `agentsim-eval-score-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const appSource = options.appSource ?? renderAppSource(spec);
@@ -198,33 +236,49 @@ async function createEvalFixture(
     await writeFixtureFile(finalPackageDir, "trace/domain-spec.json", JSON.stringify(options.traceDomainSpec ?? spec, null, 2));
   }
   if (!omittedTraceFiles.has("context-eval.json")) {
-    await writeFixtureFile(finalPackageDir, "trace/context-eval.json", JSON.stringify({
-      evaluation: options.contextEvaluation ?? {
-        runId: "run",
-        generatedAt: "2026-05-31T00:00:00.000Z",
-        packageCount: 1,
-        actionCount: 1,
-        artifactCount: 1,
-        totalItemCount: 3,
-        totalChars: 200,
-        requiredCoverageOk: true,
-        provenanceOk: true,
-        failures: []
-      }
-    }, null, 2));
+    await writeFixtureFile(
+      finalPackageDir,
+      "trace/context-eval.json",
+      JSON.stringify(
+        {
+          evaluation: options.contextEvaluation ?? {
+            runId: "run",
+            generatedAt: "2026-05-31T00:00:00.000Z",
+            packageCount: 1,
+            actionCount: 1,
+            artifactCount: 1,
+            totalItemCount: 3,
+            totalChars: 200,
+            requiredCoverageOk: true,
+            provenanceOk: true,
+            failures: [],
+          },
+        },
+        null,
+        2,
+      ),
+    );
   }
   if (!omittedTraceFiles.has("run-summary.json")) {
-    await writeFixtureFile(finalPackageDir, "trace/run-summary.json", JSON.stringify({
-      runId: "run",
-      goal: spec.sourceGoal,
-      status: "COMPLETED",
-      modelMode: "mock",
-      provider: "deterministic-mock",
+    await writeFixtureFile(
       finalPackageDir,
-      artifactCount: 1,
-      validationResult: { ok: true, failures: [] },
-      failures: []
-    }, null, 2));
+      "trace/run-summary.json",
+      JSON.stringify(
+        {
+          runId: "run",
+          goal: spec.sourceGoal,
+          status: "COMPLETED",
+          modelMode: "mock",
+          provider: "deterministic-mock",
+          finalPackageDir,
+          artifactCount: 1,
+          validationResult: { ok: true, failures: [] },
+          failures: [],
+        },
+        null,
+        2,
+      ),
+    );
   }
   if (options.traceDomainInference) {
     await writeFixtureFile(finalPackageDir, "trace/domain-inference.json", JSON.stringify(options.traceDomainInference, null, 2));
@@ -238,16 +292,23 @@ async function createEvalFixture(
       startedAt: "2026-05-31T00:00:00.000Z",
       status: "COMPLETED",
       modelMode: "mock",
-      outputDir: finalPackageDir
+      outputDir: finalPackageDir,
     },
     finalPackageDir,
     artifacts: [],
     decisions: [],
-    domainSpec: spec
+    domainSpec: spec,
+    appSpec: appSpecFromDomainSpec(spec),
   };
 }
 
-async function writeRequiredFinalPackageFiles(finalPackageDir: string, spec: DomainSpec, appSource: string, appReadme: string, serverSource?: string): Promise<void> {
+async function writeRequiredFinalPackageFiles(
+  finalPackageDir: string,
+  spec: DomainSpec,
+  appSource: string,
+  appReadme: string,
+  serverSource?: string,
+): Promise<void> {
   for (const relativePath of softwareFreelancePack.requiredFinalPackageFiles) {
     await writeFixtureFile(finalPackageDir, relativePath, requiredFileContent(relativePath, spec, appSource, appReadme, serverSource));
   }
@@ -286,11 +347,19 @@ function createEvalCase(spec: DomainSpec, overrides: Partial<EvalCase["expected"
       primaryEntity: spec.primaryEntity.name,
       requiredFields: spec.primaryEntity.fields.filter((field) => field.required).map((field) => field.name),
       requiredStatuses: spec.workflowStatuses,
-      requiredArtifacts: ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      requiredArtifacts: [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/server.js",
+        "app/README.md",
+        "trace/domain-spec.json",
+        "trace/context-eval.json",
+        "trace/run-summary.json",
+      ],
       requiredPhrases: [],
       forbiddenPhrases: [],
-      ...overrides
-    }
+      ...overrides,
+    },
   };
 }
 
@@ -337,13 +406,17 @@ async function writeFixtureFile(root: string, relativePath: string, content: str
 }
 
 function renderAppSource(spec: DomainSpec): string {
-  return `export const appConfig = ${JSON.stringify({
-    appName: spec.appName,
-    primaryEntityName: spec.primaryEntity.name,
-    primaryEntityPluralName: spec.primaryEntity.pluralName,
-    fields: spec.primaryEntity.fields.map((field) => ({ name: field.name, label: field.label })),
-    statuses: spec.workflowStatuses
-  }, null, 2)};`;
+  return `export const appConfig = ${JSON.stringify(
+    {
+      appName: spec.appName,
+      primaryEntityName: spec.primaryEntity.name,
+      primaryEntityPluralName: spec.primaryEntity.pluralName,
+      fields: spec.primaryEntity.fields.map((field) => ({ name: field.name, label: field.label })),
+      statuses: spec.workflowStatuses,
+    },
+    null,
+    2,
+  )};`;
 }
 
 function renderServerSource(): string {

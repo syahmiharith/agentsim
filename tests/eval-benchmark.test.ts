@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { appSpecFromDomainSpec } from "../src/app-spec/app-spec-from-domain.js";
 import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { assertFileContains, assertFileNotContains, assertJsonPathEquals, assertJsonPathIncludes } from "../src/evals/assertions.js";
@@ -20,7 +21,7 @@ describe("eval benchmark harness", () => {
     expect(smoke).toHaveLength(8);
     expect(smoke[0]).toMatchObject({
       id: "smoke-flower-inventory",
-      expected: { appName: "Inventory Request Desk", primaryEntity: "Inventory Request" }
+      expected: { appName: "Inventory Request Desk", primaryEntity: "Inventory Request" },
     });
     expect(domain.length).toBeGreaterThan(0);
   });
@@ -31,7 +32,7 @@ describe("eval benchmark harness", () => {
 
     expect(await assertFileContains(root, "app/src/App.tsx", ["Inventory Request Desk"])).toEqual([]);
     expect(await assertFileNotContains(root, "app/src/App.tsx", ["Pending"])).toEqual([
-      expect.objectContaining({ code: "forbidden_phrase_present", severity: "error" })
+      expect.objectContaining({ code: "forbidden_phrase_present", severity: "error" }),
     ]);
     expect(assertJsonPathEquals({ app: { name: "Desk" } }, "app.name", "Desk")).toEqual([]);
     expect(assertJsonPathIncludes({ app: { statuses: ["Pending"] } }, "app.statuses", "Pending")).toEqual([]);
@@ -51,15 +52,13 @@ describe("eval benchmark harness", () => {
   it("classifies required command failures as command hard-gate failures", async () => {
     const spec = inferDomainSpec("Build a restaurant reservation system");
     const evalCase = createEvalCase(spec, {
-      commands: [{ command: "node -e \"process.exit(2)\"", cwd: ".", timeoutMs: 5_000 }]
+      commands: [{ command: 'node -e "process.exit(2)"', cwd: ".", timeoutMs: 5_000 }],
     });
     const result = await scoreEvalRun(evalCase, "command-run", await createEvalFixture(spec), { durationMs: 1 });
 
     expect(result.hardGatePassed).toBe(false);
     expect(result.failureCategory).toBe("command");
-    expect(result.failures).toEqual([
-      expect.objectContaining({ code: "command_failed", severity: "error" })
-    ]);
+    expect(result.failures).toEqual([expect.objectContaining({ code: "command_failed", severity: "error" })]);
   });
 
   it("calculates throughput summaries from accepted quality", () => {
@@ -75,7 +74,7 @@ describe("eval benchmark harness", () => {
       p95DurationMs: 300,
       qualityAdjustedPackagesPerHour: 1.8,
       retries: 2,
-      failureCategories: { none: 1, command: 1 }
+      failureCategories: { none: 1, command: 1 },
     });
   });
 });
@@ -89,17 +88,25 @@ async function createEvalFixture(spec: DomainSpec): Promise<RunDemoResult> {
   for (const relativePath of softwareFreelancePack.requiredTraceFiles) {
     await writeFixtureFile(finalPackageDir, relativePath, traceContentFor(relativePath, spec));
   }
-  await writeFixtureFile(finalPackageDir, "trace/run-summary.json", JSON.stringify({
-    runId: "run",
-    goal: spec.sourceGoal,
-    status: "COMPLETED",
-    modelMode: "mock",
-    provider: "deterministic-mock",
+  await writeFixtureFile(
     finalPackageDir,
-    artifactCount: 1,
-    validationResult: { ok: true, failures: [] },
-    failures: []
-  }, null, 2));
+    "trace/run-summary.json",
+    JSON.stringify(
+      {
+        runId: "run",
+        goal: spec.sourceGoal,
+        status: "COMPLETED",
+        modelMode: "mock",
+        provider: "deterministic-mock",
+        finalPackageDir,
+        artifactCount: 1,
+        validationResult: { ok: true, failures: [] },
+        failures: [],
+      },
+      null,
+      2,
+    ),
+  );
   return {
     taskRun: {
       id: "run",
@@ -108,12 +115,13 @@ async function createEvalFixture(spec: DomainSpec): Promise<RunDemoResult> {
       completedAt: "2026-05-31T00:00:01.000Z",
       status: "COMPLETED",
       modelMode: "mock",
-      outputDir: finalPackageDir
+      outputDir: finalPackageDir,
     },
     finalPackageDir,
     artifacts: [],
     decisions: [],
-    domainSpec: spec
+    domainSpec: spec,
+    appSpec: appSpecFromDomainSpec(spec),
   };
 }
 
@@ -128,11 +136,19 @@ function createEvalCase(spec: DomainSpec, overrides: Partial<EvalCase["expected"
       primaryEntity: spec.primaryEntity.name,
       requiredFields: spec.primaryEntity.fields.filter((field) => field.required).map((field) => field.name),
       requiredStatuses: spec.workflowStatuses,
-      requiredArtifacts: ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      requiredArtifacts: [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/server.js",
+        "app/README.md",
+        "trace/domain-spec.json",
+        "trace/context-eval.json",
+        "trace/run-summary.json",
+      ],
       requiredPhrases: [{ path: "app/src/App.tsx", terms: [spec.appName, spec.primaryEntity.fields[0].name, spec.workflowStatuses[0]] }],
       forbiddenPhrases: [],
-      ...overrides
-    }
+      ...overrides,
+    },
   };
 }
 
@@ -184,12 +200,16 @@ async function writeFixtureFile(root: string, relativePath: string, content: str
 }
 
 function renderAppSource(spec: DomainSpec): string {
-  return `export const appConfig = ${JSON.stringify({
-    appName: spec.appName,
-    primaryEntityName: spec.primaryEntity.name,
-    fields: spec.primaryEntity.fields.map((field) => ({ name: field.name, label: field.label })),
-    statuses: spec.workflowStatuses
-  }, null, 2)};`;
+  return `export const appConfig = ${JSON.stringify(
+    {
+      appName: spec.appName,
+      primaryEntityName: spec.primaryEntity.name,
+      fields: spec.primaryEntity.fields.map((field) => ({ name: field.name, label: field.label })),
+      statuses: spec.workflowStatuses,
+    },
+    null,
+    2,
+  )};`;
 }
 
 function renderServerSource(): string {
@@ -263,6 +283,6 @@ function resultStub(overrides: { accepted: boolean; hardGatePassed: boolean; qua
     qualityScore: overrides.qualityScore,
     durationMs: overrides.durationMs,
     failureCategory: overrides.failureCategory,
-    failures: []
+    failures: [],
   };
 }

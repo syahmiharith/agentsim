@@ -22,37 +22,38 @@ CLI
 -> dashboard inspection
 ```
 
-The current workflow starts from a client-style goal, infers a software-freelance domain spec, generates durable artifacts, writes a runnable app prototype, records decisions and approvals, validates the final package, and writes trace files.
+The current workflow starts from a client-style goal, infers a software-freelance domain spec, derives a single-entity `crud-workflow` AppSpec, generates durable artifacts, writes a runnable app prototype from that AppSpec, records decisions and approvals, validates the final package, and writes trace files.
 
 ## Main Modules
 
-| Module | Responsibility |
-| --- | --- |
-| `src/cli.ts` | Defines `agentsim run`, `demo`, `dashboard`, `tui`, inspection, viewer, tool registry, approval, and resume command parsing. |
-| `src/workflow.ts` | Preserves the existing `runDemo()` compatibility entry point. |
-| `src/orchestrator.ts` | Owns run creation, resume, scheduler execution, task execution, validation, approval pause, and final package completion. |
-| `src/types.ts` | Holds core contracts used across the CLI, workflow, artifacts, events, and providers. |
-| `src/agents/` | Defines the current software-freelance role set and artifact-producing step registry. |
-| `src/domain/` | Defines the software-freelance domain pack and deterministic domain-spec inference. |
-| `src/templates/` | Generates Markdown artifacts and the runnable app prototype. |
-| `src/core/artifacts.ts` | Writes artifacts, content hashes, status metadata, and lineage. |
-| `src/core/context.ts` | Assembles, validates, renders, and evaluates context packages. |
-| `src/core/events.ts` | Writes redacted JSONL event traces. |
-| `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, lineage, and context provenance. |
-| `src/core/paths.ts` | Prevents absolute-path use and workspace escape for relative path operations. |
-| `src/core/repo-context.ts` | Imports bounded read-only local repo summaries without copying source contents or secret files. |
-| `src/core/repositories.ts` | Persists local JSON state for runs, tasks, artifacts, actions, context packages, messages, events, and approvals. |
-| `src/core/scheduler.ts` | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets. |
-| `src/core/state-machines.ts` | Validates allowed run and task status transitions. |
-| `src/core/task-compiler.ts` | Projects workflow graph nodes into persisted task state for compatibility. |
-| `src/core/workflow-graph.ts` | Compiles `AgentStep` entries into a deterministic workflow graph with nodes, edges, timeouts, and validation. |
-| `src/core/tool-registry.ts` | Exposes the built-in tool manifest and validates context-policy `allowedTools`. |
-| `src/core/tools.ts` | Wraps file, artifact, command, and approval tools with risk-aware execution rules. |
-| `src/core/tool-runtime.ts` | Injects the active tool runtime into agent execution using the current stores, repos, and workspace. |
-| `src/core/workspace.ts` | Provides the local filesystem workspace driver. |
-| `src/providers/` | Provides mock and Chat Completions-compatible model providers. |
-| `src/tui/run-inspector.ts` | Inspects completed runs from local outputs. |
-| `tests/` | Captures executable expectations for CLI parsing, workflow output, domain packs, validation, hashing, redaction, and TUI inspection. |
+| Module                                 | Responsibility                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/cli.ts`                           | Defines `agentsim run`, `demo`, `dashboard`, `tui`, inspection, viewer, tool registry, approval, and resume command parsing.         |
+| `src/workflow.ts`                      | Preserves the existing `runDemo()` compatibility entry point.                                                                        |
+| `src/orchestrator.ts`                  | Owns run creation, resume, scheduler execution, task execution, validation, approval pause, and final package completion.            |
+| `src/types.ts`                         | Holds core contracts used across the CLI, workflow, artifacts, events, and providers.                                                |
+| `src/agents/`                          | Defines the current software-freelance role set and artifact-producing step registry.                                                |
+| `src/app-spec/`                        | Defines the M1 runnable app contract, validation rules, and `DomainSpec -> AppSpec` adapter for deterministic rendering.             |
+| `src/domain/`                          | Defines the software-freelance domain pack and deterministic domain-spec inference.                                                  |
+| `src/templates/`                       | Generates Markdown artifacts and the runnable app prototype.                                                                         |
+| `src/core/artifacts.ts`                | Writes artifacts, content hashes, status metadata, and lineage.                                                                      |
+| `src/core/context.ts`                  | Assembles, validates, renders, and evaluates context packages.                                                                       |
+| `src/core/events.ts`                   | Writes redacted JSONL event traces.                                                                                                  |
+| `src/core/final-package-validation.ts` | Validates required final-package files, trace files, artifact ownership, review status, lineage, and context provenance.             |
+| `src/core/paths.ts`                    | Prevents absolute-path use and workspace escape for relative path operations.                                                        |
+| `src/core/repo-context.ts`             | Imports bounded read-only local repo summaries without copying source contents or secret files.                                      |
+| `src/core/repositories.ts`             | Persists local JSON state for runs, tasks, artifacts, actions, context packages, messages, events, and approvals.                    |
+| `src/core/scheduler.ts`                | Marks dependency-ready tasks and identifies blocked, failed, and terminal task sets.                                                 |
+| `src/core/state-machines.ts`           | Validates allowed run and task status transitions.                                                                                   |
+| `src/core/task-compiler.ts`            | Projects workflow graph nodes into persisted task state for compatibility.                                                           |
+| `src/core/workflow-graph.ts`           | Compiles `AgentStep` entries into a deterministic workflow graph with nodes, edges, timeouts, and validation.                        |
+| `src/core/tool-registry.ts`            | Exposes the built-in tool manifest and validates context-policy `allowedTools`.                                                      |
+| `src/core/tools.ts`                    | Wraps file, artifact, command, and approval tools with risk-aware execution rules.                                                   |
+| `src/core/tool-runtime.ts`             | Injects the active tool runtime into agent execution using the current stores, repos, and workspace.                                 |
+| `src/core/workspace.ts`                | Provides the local filesystem workspace driver.                                                                                      |
+| `src/providers/`                       | Provides mock and Chat Completions-compatible model providers.                                                                       |
+| `src/tui/run-inspector.ts`             | Inspects completed runs from local outputs.                                                                                          |
+| `tests/`                               | Captures executable expectations for CLI parsing, workflow output, domain packs, validation, hashing, redaction, and TUI inspection. |
 
 ## Core Contracts
 
@@ -136,17 +137,25 @@ Main responsibilities:
 - rehydrate existing run state for `resume`
 - mark dependency-ready tasks before execution
 - infer a `DomainSpec` through the domain pack and persist it for resume
+- derive and persist an M1 AppSpec as the runnable generated-app contract
 - record provider and domain decisions
 - execute tasks through the scheduler in deterministic compiled-step order
 - assemble and validate a context package before each agent action
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
+- write `trace/app-spec.json` and structured `trace/app-validation.json`
 - validate package completeness and convert validation into a review verdict
 - update run and task state
 - write `trace/run-summary.json`
 - return run metadata to the CLI
 
 The default orchestration path remains single-task execution so the final package stays compatible. The scheduler can run a bounded batch of ready tasks when requested, while avoiding duplicate output producers in the same batch. Repositories remain separate so later work can add richer execution without changing the artifact contract.
+
+## Runnable App Contract
+
+M1 uses `AppSpec` as the contract between domain inference and deterministic app rendering. `DomainSpec` remains the planning and domain-inference contract; `AppSpec` is persisted to `state/app-spec.json`, exported as `trace/app-spec.json`, and consumed by the generated app renderer.
+
+The current AppSpec surface supports one primary entity, field metadata, screens, a status workflow, summary metrics, assumptions, risks, deferred features, and seed records. The only supported archetype is `crud-workflow`. Booking calendars, inventory balance math, live schema-constrained extraction, acceptance scenario execution, and multi-entity relations are later milestones and should not be implied by M1-generated apps.
 
 `resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, reloads the persisted domain spec, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses. If no model flag is supplied, the CLI uses the persisted run model mode.
 
