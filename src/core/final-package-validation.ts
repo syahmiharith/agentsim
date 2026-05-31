@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import type { AgentActionRecord, AgentMessageRecord, Artifact, ContextEvaluation, ContextPackage, DomainPack, ValidationResult } from "../types.js";
 import { validateContextPackage } from "./context.js";
 import { sha256 } from "./hash.js";
@@ -10,6 +10,7 @@ export interface FinalPackageValidationInput {
   finalPackageDir: string;
   artifacts: Artifact[];
   domainPack: DomainPack;
+  privatePathPrefixes?: string[];
 }
 
 export async function validateFinalPackage(input: FinalPackageValidationInput): Promise<ValidationResult> {
@@ -142,11 +143,68 @@ export async function validateFinalPackage(input: FinalPackageValidationInput): 
   await validateWorkflowGraphTrace(input.finalPackageDir, failures);
   await validateToolRegistryTrace(input.finalPackageDir, failures);
   await validateRepoContextTrace(input.finalPackageDir, failures);
+  await validateTracePrivacy(input.finalPackageDir, input.privatePathPrefixes ?? [], failures);
 
   return {
     ok: failures.length === 0,
     failures
   };
+}
+
+async function validateTracePrivacy(finalPackageDir: string, privatePathPrefixes: string[], failures: string[]): Promise<void> {
+  const traceDir = join(finalPackageDir, "trace");
+  if (!(await pathExists(traceDir))) {
+    return;
+  }
+
+  const candidates = [
+    finalPackageDir,
+    dirname(finalPackageDir),
+    dirname(dirname(finalPackageDir)),
+    process.cwd(),
+    ...privatePathPrefixes
+  ];
+  const privateValues = createPrivatePathValues(candidates);
+  if (privateValues.length === 0) {
+    return;
+  }
+
+  for (const file of await listTraceFiles(traceDir)) {
+    const content = await readFile(file, "utf8");
+    const leakedValue = privateValues.find((value) => content.includes(value));
+    if (leakedValue) {
+      failures.push(`Trace file ${relative(finalPackageDir, file)} contains private local path ${leakedValue}`);
+    }
+  }
+}
+
+async function listTraceFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? listTraceFiles(path) : [path];
+  }));
+  return files.flat();
+}
+
+function createPrivatePathValues(paths: string[]): string[] {
+  const values = new Set<string>();
+  for (const path of paths) {
+    if (!isPrivatePathCandidate(path)) {
+      continue;
+    }
+    values.add(path);
+    values.add(path.replaceAll("\\", "/"));
+    values.add(path.replaceAll("/", "\\"));
+    values.add(JSON.stringify(path).slice(1, -1));
+    values.add(JSON.stringify(path.replaceAll("\\", "/")).slice(1, -1));
+    values.add(JSON.stringify(path.replaceAll("/", "\\")).slice(1, -1));
+  }
+  return [...values].filter(isPrivatePathCandidate).sort((left, right) => right.length - left.length);
+}
+
+function isPrivatePathCandidate(path: string | undefined): path is string {
+  return typeof path === "string" && path.trim().length > 3;
 }
 
 async function validateWorkflowGraphTrace(finalPackageDir: string, failures: string[]): Promise<void> {

@@ -21,7 +21,7 @@ export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spe
     "app/src/main.tsx": mainTsx(),
     "app/src/App.tsx": appTsx(spec),
     "app/src/styles.css": stylesCss(),
-    "app/README.md": appReadme(workspace.runId, spec)
+    "app/README.md": appReadme(workspace.runId, spec),
   };
 }
 
@@ -39,26 +39,27 @@ function appPackageJson(spec: DomainSpec): string {
       version: "0.1.0",
       private: true,
       type: "module",
+      packageManager: "pnpm@10.32.1",
       scripts: {
         "dev:web": "vite --host 127.0.0.1",
         "dev:api": "node server.js",
         build: "tsc -b && vite build",
-        preview: "vite preview --host 127.0.0.1"
+        preview: "vite preview --host 127.0.0.1",
       },
       dependencies: {
         react: "^19.1.0",
-        "react-dom": "^19.1.0"
+        "react-dom": "^19.1.0",
       },
       devDependencies: {
         "@vitejs/plugin-react": "^4.5.0",
         "@types/react": "^19.1.0",
         "@types/react-dom": "^19.1.0",
         typescript: "^5.8.0",
-        vite: "^6.3.0"
-      }
+        vite: "^6.3.0",
+      },
     },
     null,
-    2
+    2,
   )}\n`;
 }
 
@@ -96,12 +97,12 @@ function appTsconfig(): string {
         resolveJsonModule: true,
         isolatedModules: true,
         noEmit: true,
-        jsx: "react-jsx"
+        jsx: "react-jsx",
       },
-      include: ["src"]
+      include: ["src"],
     },
     null,
-    2
+    2,
   )}\n`;
 }
 
@@ -146,7 +147,7 @@ function appTsx(spec: DomainSpec): string {
     statuses: spec.workflowStatuses,
     targetUsers: spec.targetUsers,
     screens: spec.screens,
-    coreActions: spec.coreActions
+    coreActions: spec.coreActions,
   };
 
   return `import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -676,7 +677,7 @@ function serverJs(spec: DomainSpec): string {
     primaryEntityName: spec.primaryEntity.name,
     initialStatus: spec.workflowStatuses[0] ?? "Requested",
     fields: spec.primaryEntity.fields,
-    statuses: spec.workflowStatuses
+    statuses: spec.workflowStatuses,
   };
 
   return `import { createServer } from "node:http";
@@ -807,8 +808,8 @@ const server = createServer(async (request, response) => {
     }
 
     send(response, 404, { error: "Not found." });
-  } catch (error) {
-    send(response, 500, { error: error instanceof Error ? error.message : "Unexpected server error." });
+  } catch {
+    send(response, 500, { error: "Unexpected server error." });
   }
 });
 
@@ -859,14 +860,10 @@ function seedRecords(spec: DomainSpec): Array<Record<string, string | number>> {
     ...record,
     status: String(record.status ?? spec.workflowStatuses[0] ?? "Requested"),
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
   }));
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

@@ -314,6 +314,7 @@ export interface ModelRequest {
 export interface ModelResponse {
   content: string;
   model: string;
+  providerRequestId?: string;
 }
 
 export interface ModelProvider {

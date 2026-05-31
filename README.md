@@ -185,6 +185,7 @@ pnpm demo "Build an inventory request system for a flower company" --live
 ```
 
 Existing `OPENAI_*` and `OPENAI_COMPATIBLE_*` environment variables are still supported as aliases.
+Optional live-provider reliability controls are `AGENTSIM_MODEL_TIMEOUT_MS`, `AGENTSIM_MODEL_MAX_RETRIES`, `AGENTSIM_MODEL_RETRY_BASE_DELAY_MS`, and `AGENTSIM_MODEL_MAX_TOKENS`.
 
 If no live key is configured and `--live` is not passed, Agentsim falls back to mock mode.
 

@@ -8,6 +8,9 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "tsconfig.json"
+      - "eslint.config.js"
+      - ".prettierrc.json"
+      - ".prettierignore"
       - ".github/workflows/demo-smoke.yml"
   workflow_dispatch:
 
@@ -44,11 +47,14 @@ jobs:
         run: pnpm demo "Build an inventory request system for a flower company" --mock
 
       - name: Verify final package shape
+        id: latest-run
         shell: bash
         run: |
           set -euo pipefail
           latest_run="$(find outputs -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
           test -n "$latest_run"
+          echo "$latest_run" > latest-run.txt
+          echo "path=$latest_run" >> "$GITHUB_OUTPUT"
           test -f "$latest_run/final-package/client/project-summary.md"
           test -f "$latest_run/final-package/planning/requirements.md"
           test -f "$latest_run/final-package/technical/architecture.md"
@@ -57,3 +63,22 @@ jobs:
           test -f "$latest_run/final-package/trace/events.jsonl"
           test -f "$latest_run/final-package/trace/decisions.json"
           test -f "$latest_run/final-package/trace/artifact-lineage.json"
+
+      - name: Build generated app
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_run="$(cat latest-run.txt)"
+          cd "$latest_run/final-package/app"
+          pnpm install --lockfile-only
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Upload smoke final package
+        uses: actions/upload-artifact@v4
+        if: always() && steps.latest-run.outputs.path != ''
+        with:
+          name: agentsim-smoke-final-package
+          path: ${{ steps.latest-run.outputs.path }}/final-package
+          if-no-files-found: error
+          retention-days: 7

@@ -52,6 +52,48 @@ describe("validateFinalPackage", () => {
     expect(result.failures).toContain("Missing required trace file: trace/decisions.json");
   });
 
+  it("rejects private local paths in final-package trace files", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const privatePath = join(finalPackageDir, "..", "workspace-artifacts");
+    await writeFile(join(finalPackageDir, "trace", "decisions.json"), JSON.stringify({
+      decisions: [{ id: "leak", localPath: privatePath }]
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack,
+      privatePathPrefixes: [privatePath]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures.some((failure) => failure.includes("trace\\decisions.json") || failure.includes("trace/decisions.json"))).toBe(true);
+    expect(result.failures.some((failure) => failure.includes("private local path"))).toBe(true);
+  });
+
+  it("rejects escaped private paths in nested trace files", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    const privatePath = join(finalPackageDir, "..", "workspace-artifacts");
+    const nestedTraceDir = join(finalPackageDir, "trace", "nested");
+    await mkdir(nestedTraceDir, { recursive: true });
+    await writeFile(join(nestedTraceDir, "leak.json"), JSON.stringify({
+      localPath: privatePath.replaceAll("\\", "/")
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack,
+      privatePathPrefixes: [privatePath]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures.some((failure) => failure.includes("nested"))).toBe(true);
+    expect(result.failures.some((failure) => failure.includes("private local path"))).toBe(true);
+  });
+
   it("requires context package and evaluation trace files", async () => {
     const finalPackageDir = await createCompletePackage();
     const artifacts = await createArtifacts(finalPackageDir);
@@ -162,6 +204,21 @@ describe("validateFinalPackage", () => {
       "Context evaluation reports incomplete provenance",
       "Context evaluation failure: missing context"
     ]));
+  });
+
+  it("rejects context evaluation traces without an evaluation payload", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    await writeFile(join(finalPackageDir, "trace", "context-eval.json"), JSON.stringify({}, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Context evaluation trace is missing evaluation");
   });
 
   it("reports invalid artifact lineage", async () => {
@@ -290,6 +347,82 @@ describe("validateFinalPackage", () => {
     expect(result.failures).toContain("Agent message bad-message is missing expectedOutput");
     expect(result.failures).toContain(`Agent message bad-message sender builder does not own artifact ${artifacts[0].id}`);
     expect(result.failures).toContain("Agent action step-0 references unknown input message missing-message");
+  });
+
+  it("rejects invalid agent message trace JSON", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    await writeFile(join(finalPackageDir, "trace", "agent-messages.json"), "{not-json", "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Agent message trace is not valid JSON");
+  });
+
+  it("rejects messages with unknown recipients and missing artifact references", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    await writeFile(join(finalPackageDir, "trace", "agent-messages.json"), JSON.stringify({
+      messages: [
+        {
+          id: "dangling-message",
+          runId: "validation-run",
+          type: "artifact.handoff",
+          from: "orchestrator",
+          to: "unknown-agent",
+          stepId: "step-1",
+          artifactId: "missing-artifact",
+          artifactType: artifacts[0].type,
+          question: "Review this artifact",
+          expectedOutput: "Confirm handoff",
+          createdAt: "2026-05-30T00:00:00.000Z"
+        }
+      ]
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Agent message dangling-message has unknown recipient unknown-agent");
+    expect(result.failures).toContain("Agent message dangling-message references unknown artifact missing-artifact");
+  });
+
+  it("rejects messages from unknown senders", async () => {
+    const finalPackageDir = await createCompletePackage();
+    const artifacts = await createArtifacts(finalPackageDir);
+    await writeFile(join(finalPackageDir, "trace", "agent-messages.json"), JSON.stringify({
+      messages: [
+        {
+          id: "unknown-sender-message",
+          runId: "validation-run",
+          type: "task.assignment",
+          from: "unknown-agent",
+          to: "scope-pm",
+          stepId: "step-1",
+          question: "Produce requirements",
+          expectedOutput: "Requirements document",
+          createdAt: "2026-05-30T00:00:00.000Z"
+        }
+      ]
+    }, null, 2), "utf8");
+
+    const result = await validateFinalPackage({
+      finalPackageDir,
+      artifacts,
+      domainPack: softwareFreelancePack
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain("Agent message unknown-sender-message has unknown sender unknown-agent");
   });
 
   it("rejects duplicate messages, invalid message types, artifact type mismatches, and empty action inputs", async () => {

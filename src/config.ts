@@ -8,6 +8,10 @@ export interface LiveModelConfig {
   apiKey?: string;
   baseUrl: string;
   model: string;
+  requestTimeoutMs: number;
+  maxRetries: number;
+  retryBaseDelayMs: number;
+  maxTokens?: number;
 }
 
 export function loadDotEnv(cwd = process.cwd()): void {
@@ -36,19 +40,18 @@ export function loadDotEnv(cwd = process.cwd()): void {
 }
 
 export function getLiveModelConfig(): LiveModelConfig {
+  const baseUrl = process.env.AGENTSIM_MODEL_BASE_URL ?? process.env.OPENAI_BASE_URL ?? process.env.OPENAI_COMPATIBLE_BASE_URL ?? "https://api.openai.com/v1";
+  const model = process.env.AGENTSIM_MODEL_NAME ?? process.env.OPENAI_MODEL ?? process.env.OPENAI_COMPATIBLE_MODEL ?? "gpt-4.1-mini";
+
   return {
     providerKind: parseProviderKind(process.env.AGENTSIM_MODEL_PROVIDER),
-    apiKey: process.env.AGENTSIM_MODEL_API_KEY
-      ?? process.env.OPENAI_API_KEY
-      ?? process.env.OPENAI_COMPATIBLE_API_KEY,
-    baseUrl: process.env.AGENTSIM_MODEL_BASE_URL
-      ?? process.env.OPENAI_BASE_URL
-      ?? process.env.OPENAI_COMPATIBLE_BASE_URL
-      ?? "https://api.openai.com/v1",
-    model: process.env.AGENTSIM_MODEL_NAME
-      ?? process.env.OPENAI_MODEL
-      ?? process.env.OPENAI_COMPATIBLE_MODEL
-      ?? "gpt-4.1-mini"
+    apiKey: process.env.AGENTSIM_MODEL_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.OPENAI_COMPATIBLE_API_KEY,
+    baseUrl: validateBaseUrl(baseUrl),
+    model: validateModelName(model),
+    requestTimeoutMs: readIntegerEnv("AGENTSIM_MODEL_TIMEOUT_MS", 60_000, { min: 1 }),
+    maxRetries: readIntegerEnv("AGENTSIM_MODEL_MAX_RETRIES", 2, { min: 0 }),
+    retryBaseDelayMs: readIntegerEnv("AGENTSIM_MODEL_RETRY_BASE_DELAY_MS", 500, { min: 0 }),
+    maxTokens: readOptionalIntegerEnv("AGENTSIM_MODEL_MAX_TOKENS", { min: 1 }),
   };
 }
 
@@ -58,4 +61,51 @@ function parseProviderKind(value: string | undefined): LiveModelProviderKind {
   }
 
   throw new Error(`Unsupported AGENTSIM_MODEL_PROVIDER: ${value}`);
+}
+
+function validateBaseUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Live model base URL must be a valid URL.");
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Live model base URL must use http or https.");
+  }
+
+  return value;
+}
+
+function validateModelName(value: string): string {
+  if (value.trim().length === 0) {
+    throw new Error("Live model name must not be empty.");
+  }
+
+  return value;
+}
+
+function readIntegerEnv(key: string, defaultValue: number, options: { min: number }): number {
+  const value = process.env[key];
+  if (value === undefined || value.trim().length === 0) {
+    return defaultValue;
+  }
+  return parseIntegerConfig(key, value, options);
+}
+
+function readOptionalIntegerEnv(key: string, options: { min: number }): number | undefined {
+  const value = process.env[key];
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  return parseIntegerConfig(key, value, options);
+}
+
+function parseIntegerConfig(key: string, value: string, options: { min: number }): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < options.min) {
+    throw new Error(`${key} must be an integer greater than or equal to ${options.min}.`);
+  }
+  return parsed;
 }

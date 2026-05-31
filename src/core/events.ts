@@ -4,10 +4,13 @@ import { dirname } from "node:path";
 import type { Event, EventStore } from "../types.js";
 import { redactRecord, redactSecrets } from "./redact.js";
 
+type EventTransform = (event: Event) => Event;
+
 export class JsonlEventStore implements EventStore {
   constructor(
     private readonly runId: string,
-    private readonly eventsPath: string
+    private readonly eventsPath: string,
+    private readonly transform?: EventTransform
   ) {}
 
   async append(input: Omit<Event, "id" | "timestamp" | "runId">): Promise<Event> {
@@ -24,8 +27,9 @@ export class JsonlEventStore implements EventStore {
   }
 
   async appendExisting(event: Event): Promise<Event> {
+    const eventToWrite = this.transform ? this.transform(event) : event;
     await mkdir(dirname(this.eventsPath), { recursive: true });
-    await appendFile(this.eventsPath, `${JSON.stringify(event)}\n`, "utf8");
+    await appendFile(this.eventsPath, `${JSON.stringify(eventToWrite)}\n`, "utf8");
     return event;
   }
 }

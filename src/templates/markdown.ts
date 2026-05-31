@@ -335,7 +335,7 @@ function repoContextNote(repoContext: RepoContextSummary | undefined): string {
   }
   const frameworks = repoContext.frameworks.length > 0 ? repoContext.frameworks.join(", ") : "no framework";
   const managers = repoContext.packageManagers.length > 0 ? repoContext.packageManagers.join(", ") : "no package manager";
-  return `\n## Imported Repo Context\n\nAgentsim imported read-only context from \`${repoContext.rootPath}\`, detecting ${frameworks} and ${managers}. The generated package still avoids copying private source content or secrets.`;
+  return `\n## Imported Repo Context\n\nAgentsim imported read-only context from \`<repo>\`, detecting ${frameworks} and ${managers}. The generated package still avoids copying private source content or secrets.`;
 }
 
 export function userGuide(spec: DomainSpec): string {

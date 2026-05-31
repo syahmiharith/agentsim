@@ -40,6 +40,8 @@ documentation:
           - "SECURITY.md"
           - "SUPPORT.md"
           - "AGENTS.md"
+          - "docs/**"
+          - "examples/**"
 
 github:
   - changed-files:

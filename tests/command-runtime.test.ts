@@ -34,8 +34,12 @@ describe("safe command execution", () => {
 
       const stateTrace = await readFile(join(workspace.rootDir, "state", "command-results.jsonl"), "utf8");
       const packageTrace = await readFile(join(workspace.finalPackageDir, "trace", "command-results.jsonl"), "utf8");
+      const stateRecord = JSON.parse(stateTrace.trim());
+      const packageRecord = JSON.parse(packageTrace.trim());
       expect(stateTrace).toContain("\"command\":\"node\"");
       expect(packageTrace).toContain("\"command\":\"node\"");
+      expect(stateRecord.cwd).toBe(workspace.workspaceDir);
+      expect(packageRecord.cwd).toBe("<workspace>");
     } finally {
       if (previous === undefined) {
         delete process.env.AGENTSIM_MODEL_API_KEY;

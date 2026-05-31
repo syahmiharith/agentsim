@@ -36,14 +36,57 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Audit dependencies
+        run: pnpm audit:deps
+
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Test
         run: pnpm test
 
+      - name: Coverage
+        run: pnpm coverage
+
+      - name: Add coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+            node -e "const fs=require('fs'); const total=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')).total; for (const key of ['lines','statements','functions','branches']) console.log('- '+key+': '+total[key].pct+'%');" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Coverage summary not found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentsim-coverage-summary
+          path: coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Build
         run: pnpm build
 
       - name: Mock evals
         run: pnpm eval:mock
+
+      - name: Upload mock eval reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentsim-mock-eval-reports
+          path: |
+            outputs/evals/latest.json
+            outputs/evals/latest.md
+            outputs/evals/latest.csv
+          if-no-files-found: ignore
+          retention-days: 7

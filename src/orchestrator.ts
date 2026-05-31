@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { getAgent } from "./agents/agents.js";
 import { agentSteps as defaultAgentSteps } from "./agents/steps.js";
 import { FileArtifactStore } from "./core/artifacts.js";
@@ -17,6 +17,7 @@ import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, ma
 import { builtInToolRegistry } from "./core/tool-registry.js";
 import { createToolRuntime, hasApprovedAction, requestToolApproval } from "./core/tool-runtime.js";
 import { ToolApprovalRequiredError } from "./core/tools.js";
+import { redactTraceValue, type TraceRedactionInput } from "./core/trace-redaction.js";
 import { LocalFilesystemWorkspaceDriver } from "./core/workspace.js";
 import { compileAgentStepsToWorkflowGraph, exportWorkflowGraph, workflowGraphToTasks, type WorkflowGraph } from "./core/workflow-graph.js";
 import type { DomainInferenceResult } from "./domain/domain-inference.js";
@@ -129,8 +130,14 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const safeGoal = redactSecrets(options.goal);
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(runId, outputRoot);
+  let repoContext: RepoContextSummary | undefined;
+  const traceRedactionInput = (): TraceRedactionInput => ({
+    workspace,
+    repoRoot: repoContext?.rootPath,
+    extraPaths: [process.cwd(), resolve(outputRoot)]
+  });
   const eventStore = new CompositeEventStore(runId, [
-    new JsonlEventStore(runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl")),
+    new JsonlEventStore(runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl"), (event) => redactTraceValue(event, traceRedactionInput())),
     new JsonlEventStore(runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
   ]);
   const artifactStore = new FileArtifactStore(workspace);
@@ -160,7 +167,6 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     outputDir: workspace.rootDir
   };
   let workflowGraph: WorkflowGraph;
-  let repoContext: RepoContextSummary | undefined;
   try {
     workflowGraph = compileAgentStepsToWorkflowGraph(runId, steps);
     repoContext = options.repoPath ? await scanRepoContext(options.repoPath) : undefined;
@@ -274,8 +280,14 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
 
   const driver = new LocalFilesystemWorkspaceDriver();
   const workspace = await driver.create(options.runId, outputRoot);
+  const repoContext = await loadPersistedRepoContext(runRoot);
+  const traceRedactionInput = (): TraceRedactionInput => ({
+    workspace,
+    repoRoot: repoContext?.rootPath,
+    extraPaths: [process.cwd(), resolve(outputRoot)]
+  });
   const eventStore = new CompositeEventStore(options.runId, [
-    new JsonlEventStore(options.runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl")),
+    new JsonlEventStore(options.runId, safeJoin(workspace.finalPackageDir, "trace/events.jsonl"), (event) => redactTraceValue(event, traceRedactionInput())),
     new JsonlEventStore(options.runId, safeJoin(workspace.rootDir, "state/events.jsonl"))
   ]);
   const tasksRepo = new LocalTasksRepo(runRoot);
@@ -290,7 +302,6 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const domainInference = await loadPersistedDomainInference(runRoot, domainPack, existingRun.userGoal, domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const workflowGraph = await loadPersistedWorkflowGraph(runRoot, options.runId, steps);
-  const repoContext = await loadPersistedRepoContext(runRoot);
   const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
   const existingTasks = await tasksRepo.listTasksByRun();
   if (existingTasks.length === 0) {
@@ -403,7 +414,8 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
   let validationResult = await runtime.validateFinalPackage({
     finalPackageDir: runtime.workspace.finalPackageDir,
     artifacts: runtime.artifactStore.list(),
-    domainPack: runtime.domainPack
+    domainPack: runtime.domainPack,
+    privatePathPrefixes: privateTracePathPrefixes(runtime)
   });
   let reviewResult = reviewResultFromValidation(validationResult);
 
@@ -428,7 +440,8 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
       validationResult = await runtime.validateFinalPackage({
         finalPackageDir: runtime.workspace.finalPackageDir,
         artifacts: runtime.artifactStore.list(),
-        domainPack: runtime.domainPack
+        domainPack: runtime.domainPack,
+        privatePathPrefixes: privateTracePathPrefixes(runtime)
       });
       reviewResult = reviewResultFromValidation(validationResult);
     }
@@ -448,7 +461,7 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
       artifactCount: runtime.artifactStore.list().length,
       validationResult,
       failures: validationResult.failures
-    }, runtime.workspace.finalPackageDir);
+    }, runtime);
     if (reviewResult.verdict === "revise") {
       await runtime.eventStore.append({
         level: "warn",
@@ -474,7 +487,7 @@ async function completeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Prom
     artifactCount: runtime.artifactStore.list().length,
     validationResult,
     failures: []
-  }, runtime.workspace.finalPackageDir);
+  }, runtime);
   await runtime.eventStore.append({
     level: "info",
     name: "run.completed",
@@ -519,14 +532,14 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
     }
 
     if (failures.some((failure) => failure.includes("trace/context-eval.json"))) {
-      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-eval.json"), JSON.stringify({
+      await writeTraceJson(runtime, "trace/context-eval.json", {
         evaluation: evaluateContextPackages({
           runId: runtime.runId,
           packages: runtime.contextPackages,
           actions: runtime.agentActions,
           artifacts: runtime.artifactStore.list()
         })
-      }, null, 2), "utf8");
+      });
       applied.push("trace/context-eval.json");
     }
 
@@ -541,7 +554,7 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
     }
 
     if (failures.some((failure) => failure.includes("trace/artifact-lineage.json") || failure.includes("lineage"))) {
-      await runtime.artifactStore.exportLineage(safeJoin(runtime.workspace.finalPackageDir, "trace/artifact-lineage.json"));
+      await writeTraceJson(runtime, "trace/artifact-lineage.json", { artifacts: runtime.artifactStore.list() });
       applied.push("trace/artifact-lineage.json");
     }
 
@@ -1152,31 +1165,54 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   }
   const traceApprovals = mergeApprovalsById(await runtime.approvalsRepo.listApprovalsByRun());
 
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/domain-inference.json"), JSON.stringify(traceDomainInference(runtime.domainInference), null, 2), "utf8");
+  await writeTraceJson(runtime, "trace/domain-spec.json", runtime.domainSpec);
+  await writeTraceJson(runtime, "trace/domain-inference.json", traceDomainInference(runtime.domainInference));
   await exportWorkflowGraph(runtime.workflowGraph, safeJoin(runtime.workspace.finalPackageDir, "trace/workflow-graph.json"));
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/tool-registry.json"), JSON.stringify(builtInToolRegistry, null, 2), "utf8");
+  await writeTraceJson(runtime, "trace/tool-registry.json", builtInToolRegistry);
   if (runtime.repoContext) {
-    await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/repo-context.json"), JSON.stringify(runtime.repoContext, null, 2), "utf8");
+    await writeTraceJson(runtime, "trace/repo-context.json", runtime.repoContext);
   }
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/decisions.json"), JSON.stringify({ decisions: runtime.decisions }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/approvals.json"), JSON.stringify({ approvals: traceApprovals }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-messages.json"), JSON.stringify({ messages: runtime.agentMessages }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/agent-actions.json"), JSON.stringify({ actions: runtime.agentActions }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-packages.json"), JSON.stringify({ contextPackages: runtime.contextPackages }, null, 2), "utf8");
-  await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/context-eval.json"), JSON.stringify({
+  await writeTraceJson(runtime, "trace/decisions.json", { decisions: runtime.decisions });
+  await writeTraceJson(runtime, "trace/approvals.json", { approvals: traceApprovals });
+  await writeTraceJson(runtime, "trace/agent-messages.json", { messages: runtime.agentMessages });
+  await writeTraceJson(runtime, "trace/agent-actions.json", { actions: runtime.agentActions });
+  await writeTraceJson(runtime, "trace/context-packages.json", { contextPackages: runtime.contextPackages }, { redactLocalPaths: false });
+  await writeTraceJson(runtime, "trace/context-eval.json", {
     evaluation: evaluateContextPackages({
       runId: runtime.runId,
       packages: runtime.contextPackages,
       actions: runtime.agentActions,
       artifacts: runtime.artifactStore.list()
     })
-  }, null, 2), "utf8");
-  await runtime.artifactStore.exportLineage(safeJoin(runtime.workspace.finalPackageDir, "trace/artifact-lineage.json"));
+  });
+  await writeTraceJson(runtime, "trace/artifact-lineage.json", { artifacts: runtime.artifactStore.list() });
 }
 
-async function writeRunSummary(summary: RunSummary, finalPackageDir: string): Promise<void> {
-  await writeFile(safeJoin(finalPackageDir, "trace/run-summary.json"), JSON.stringify(summary, null, 2), "utf8");
+async function writeRunSummary(summary: RunSummary, runtime: OrchestratorRuntime): Promise<void> {
+  await writeTraceJson(runtime, "trace/run-summary.json", summary);
+}
+
+async function writeTraceJson(runtime: OrchestratorRuntime, relativePath: string, value: unknown, options: { redactLocalPaths?: boolean } = {}): Promise<void> {
+  const outputPath = safeJoin(runtime.workspace.finalPackageDir, relativePath);
+  await mkdir(dirname(outputPath), { recursive: true });
+  const traceValue = options.redactLocalPaths === false ? value : redactTraceValue(value, getTraceRedactionInput(runtime));
+  await writeFile(outputPath, JSON.stringify(traceValue, null, 2), "utf8");
+}
+
+function getTraceRedactionInput(runtime: OrchestratorRuntime): TraceRedactionInput {
+  return {
+    workspace: runtime.workspace,
+    repoRoot: runtime.repoContext?.rootPath,
+    extraPaths: privateTracePathPrefixes(runtime)
+  };
+}
+
+function privateTracePathPrefixes(runtime: OrchestratorRuntime): string[] {
+  return [
+    process.cwd(),
+    dirname(runtime.workspace.rootDir),
+    runtime.repoContext?.rootPath
+  ].filter((path): path is string => Boolean(path));
 }
 
 async function createArtifact(input: {

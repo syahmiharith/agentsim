@@ -17,6 +17,27 @@ describe("core utilities", () => {
     expect(redactSecrets("Authorization: Bearer abc.def.ghi")).toContain("Bearer [REDACTED]");
   });
 
+  it("redacts common provider, source control, cloud, and private key secrets", () => {
+    const input = [
+      "anthropic_api_key=sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890",
+      "github_token=ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+      "fine_grained=github_pat_abcdefghijklmnopqrstuvwxyz_1234567890",
+      "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF",
+      "AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz1234567890",
+      "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+      "-----BEGIN PRIVATE KEY-----\nvery-secret-material\n-----END PRIVATE KEY-----",
+    ].join("\n");
+
+    const redacted = redactSecrets(input);
+
+    expect(redacted).not.toContain("sk-ant-api03");
+    expect(redacted).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz");
+    expect(redacted).not.toContain("github_pat_abcdefghijklmnopqrstuvwxyz");
+    expect(redacted).not.toContain("AKIA1234567890ABCDEF");
+    expect(redacted).not.toContain("abcdefghijklmnopqrstuvwxyz1234567890");
+    expect(redacted).not.toContain("very-secret-material");
+  });
+
   it("redacts records before event persistence", () => {
     const redacted = redactRecord({ token: "secret-value", nested: { apiKey: "abc123" } });
     expect(JSON.stringify(redacted)).not.toContain("secret-value");
@@ -31,7 +52,7 @@ describe("core utilities", () => {
     await store.append({
       level: "info",
       name: "test.event",
-      message: "hello"
+      message: "hello",
     });
 
     const [line] = (await readFile(eventsPath, "utf8")).trim().split("\n");

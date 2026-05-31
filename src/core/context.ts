@@ -110,7 +110,7 @@ export async function assembleContextPackage(input: AssembleContextPackageInput)
       kind: "repo_summary",
       source: "repo.context",
       sourceId: input.runId,
-      content: JSON.stringify(input.repoContext, null, 2),
+      content: JSON.stringify({ ...input.repoContext, rootPath: "<repo>" }, null, 2),
       createdAt,
       policy
     }));

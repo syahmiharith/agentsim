@@ -4,6 +4,8 @@ import { ChatCompletionsCompatibleProvider } from "./chat-completions-compatible
 import { MockModelProvider } from "./mock-model-provider.js";
 
 export type ProviderSelection = "auto" | "mock" | "live";
+export { ProviderError } from "./provider-error.js";
+export type { ProviderErrorCategory } from "./provider-error.js";
 
 export function createModelProvider(selection: ProviderSelection): ModelProvider {
   const liveConfig = getLiveModelConfig();

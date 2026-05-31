@@ -5,6 +5,7 @@ import type { RunCommandInput, RunCommandResult, Workspace, WorkspaceDriver } fr
 import { assertCommandAllowed, resolveCommandPolicy } from "./command-policy.js";
 import { assertPathInside, safeJoin } from "./paths.js";
 import { redactSecrets } from "./redact.js";
+import { redactTraceValue } from "./trace-redaction.js";
 
 export class LocalFilesystemWorkspaceDriver implements WorkspaceDriver {
   private readonly createdRoots = new Set<string>();
@@ -203,5 +204,5 @@ async function appendCommandResultTrace(workspace: Workspace, result: RunCommand
   await mkdir(dirname(statePath), { recursive: true });
   await mkdir(dirname(tracePath), { recursive: true });
   await appendFile(statePath, `${JSON.stringify(record)}\n`, "utf8");
-  await appendFile(tracePath, `${JSON.stringify(record)}\n`, "utf8");
+  await appendFile(tracePath, `${JSON.stringify(redactTraceValue(record, { workspace }))}\n`, "utf8");
 }

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+outputs/
+private/
+docs/private/
+.codex/
+.agent-scratch/
+.agent-memory/

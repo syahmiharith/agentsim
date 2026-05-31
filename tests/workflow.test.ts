@@ -239,6 +239,33 @@ describe("demo workflow", () => {
     expect(contents.join("\n")).not.toContain(secret);
     expect(contents.join("\n")).toContain("[REDACTED]");
   });
+
+  it("redacts local paths from final-package traces while preserving state evidence", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-trace-privacy-test-"));
+    const runId = "trace-privacy-run";
+    const repoRoot = process.cwd();
+    const result = await runDemo({
+      goal: "Build an inventory request system for a flower company",
+      outputRoot,
+      runId,
+      repoPath: repoRoot,
+      modelProvider: new MockModelProvider()
+    });
+
+    const traceFiles = await listFiles(join(result.finalPackageDir, "trace"));
+    const traceContent = (await Promise.all(traceFiles.map((file) => readFile(file, "utf8")))).join("\n");
+    for (const privatePath of [repoRoot, outputRoot, join(outputRoot, runId), result.finalPackageDir]) {
+      for (const variant of pathVariants(privatePath)) {
+        expect(traceContent).not.toContain(variant);
+      }
+    }
+    expect(traceContent).toContain("<repo>");
+    expect(traceContent).toContain("<workspace>");
+    expect(traceContent).toContain("<final-package>");
+
+    const stateRepoContext = JSON.parse(await readFile(join(outputRoot, runId, "state", "repo-context.json"), "utf8"));
+    expect(stateRepoContext.rootPath).toBe(repoRoot);
+  });
 });
 
 class RecordingLiveProvider implements ModelProvider {
@@ -262,4 +289,12 @@ async function listFiles(root: string): Promise<string[]> {
     return entry.isDirectory() ? listFiles(path) : [path];
   }));
   return files.flat();
+}
+
+function pathVariants(path: string): string[] {
+  return [...new Set([
+    path,
+    path.replaceAll("\\", "/"),
+    path.replaceAll("/", "\\")
+  ])];
 }

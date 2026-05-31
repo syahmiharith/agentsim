@@ -88,10 +88,18 @@ pnpm agentsim inspect <runId>
 pnpm agentsim events <runId>
 pnpm agentsim artifacts <runId>
 pnpm agentsim tasks <runId>
+pnpm agentsim graph <runId>
 pnpm agentsim approvals <runId>
+pnpm agentsim contexts <runId>
+pnpm agentsim context <runId> <contextPackageId>
+pnpm agentsim viewer <runId>
+pnpm agentsim tools
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
-pnpm agentsim resume <runId>
+pnpm agentsim resume <runId> [--mock|--live]
+pnpm eval:domain
+pnpm eval:runtime
+pnpm eval:throughput
 ```
 
 Maintainer-local checks are private evidence. Do not publish, document, or commit their outputs until the maintainer intentionally chooses what to share.

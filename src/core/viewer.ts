@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { Artifact, ContextPackage, Event, RepoContextSummary, Run, Task } from "../types.js";
 import type { ToolRegistry } from "./tool-registry.js";
