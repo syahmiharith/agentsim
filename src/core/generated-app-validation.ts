@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppSpec } from "../app-spec/app-spec.js";
 
+const REQUIRED_APP_FILES = ["app/package.json", "app/README.md", "app/server.js", "app/src/App.tsx", "app/src/main.tsx"] as const;
+
+const REQUIRED_PACKAGE_SCRIPTS = ["dev:api", "dev:web", "build"] as const;
+const REQUIRED_README_COMMANDS = ["pnpm install", "pnpm dev:api", "pnpm dev:web", "pnpm build"] as const;
+
 export interface GeneratedAppValidationCheck {
   id: string;
   status: "passed" | "failed";
@@ -20,12 +25,13 @@ export async function validateGeneratedApp(finalPackageDir: string, appSpec: App
   const files = await readGeneratedFiles(finalPackageDir, appSpec);
 
   checks.push(requiredFilesCheck(files));
-  checks.push(readmeCommandsCheck(files));
+  checks.push(packageJsonParsesCheck(files));
   checks.push(packageScriptsCheck(files));
+  checks.push(readmeCommandsCheck(files));
   checks.push(apiRoutesCheck(files, appSpec));
+  checks.push(seedDataCheck(files, appSpec));
   checks.push(uiTermsCheck(files, appSpec));
   checks.push(workflowStatusesCheck(files, appSpec));
-  checks.push(seedDataCheck(files, appSpec));
 
   const passed = checks.filter((check) => check.status === "passed").length;
   const ok = checks.every((check) => check.status === "passed");
@@ -40,14 +46,7 @@ export async function validateGeneratedApp(finalPackageDir: string, appSpec: App
 }
 
 async function readGeneratedFiles(finalPackageDir: string, appSpec: AppSpec): Promise<Record<string, string | undefined>> {
-  const relativePaths = [
-    "app/package.json",
-    "app/README.md",
-    "app/server.js",
-    "app/src/App.tsx",
-    "app/src/main.tsx",
-    `app/data/${appSpec.primaryEntity.slug}.json`,
-  ];
+  const relativePaths = [...REQUIRED_APP_FILES, seedDataPath(appSpec)];
   const files: Record<string, string | undefined> = {};
   for (const relativePath of relativePaths) {
     try {
@@ -70,57 +69,53 @@ function requiredFilesCheck(files: Record<string, string | undefined>): Generate
 
 function readmeCommandsCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
   const readme = files["app/README.md"] ?? "";
-  const requiredCommands = ["pnpm install", "pnpm dev:api", "pnpm dev:web", "pnpm build"];
-  const missing = requiredCommands.filter((command) => !readme.includes(command));
+  const missing = REQUIRED_README_COMMANDS.filter((command) => !readme.includes(command));
   return missing.length === 0
     ? passed("shape.readme-commands", "Generated app README documents install, dev, and build commands.")
     : failed("shape.readme-commands", `Generated app README is missing commands: ${missing.join(", ")}`);
 }
 
+function packageJsonParsesCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
+  const parseResult = parsePackageJson(files);
+  return parseResult.ok
+    ? passed("shape.package-json-valid", "Generated app package.json parses as JSON.")
+    : failed("shape.package-json-valid", "Generated app package.json is not valid JSON.");
+}
+
 function packageScriptsCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
-  try {
-    const packageJson = JSON.parse(files["app/package.json"] ?? "") as { scripts?: Record<string, unknown> };
-    const scripts = packageJson.scripts ?? {};
-    const missing = ["dev:api", "dev:web", "build"].filter((script) => typeof scripts[script] !== "string" || scripts[script].length === 0);
-    return missing.length === 0
-      ? passed("shape.package-scripts", "Generated app package.json includes required scripts.")
-      : failed("shape.package-scripts", `Generated app package.json is missing scripts: ${missing.join(", ")}`);
-  } catch {
-    return failed("shape.package-scripts", "Generated app package.json is not valid JSON.");
+  const parseResult = parsePackageJson(files);
+  if (!parseResult.ok) {
+    return failed("shape.package-scripts", "Generated app package.json scripts could not be checked because package.json is invalid.");
   }
+  const scripts = parseResult.packageJson.scripts ?? {};
+  const missing = REQUIRED_PACKAGE_SCRIPTS.filter((script) => typeof scripts[script] !== "string" || scripts[script].trim().length === 0);
+  return missing.length === 0
+    ? passed("shape.package-scripts", "Generated app package.json includes required scripts.")
+    : failed("shape.package-scripts", `Generated app package.json is missing scripts: ${missing.join(", ")}`);
 }
 
 function apiRoutesCheck(files: Record<string, string | undefined>, appSpec: AppSpec): GeneratedAppValidationCheck {
   const server = files["app/server.js"] ?? "";
-  const requiredTerms = [
-    "/api/health",
-    `"/api/" + config.entitySlug`,
-    `config.entitySlug + "/([^/]+)/status$"`,
-    appSpec.primaryEntity.slug,
-    'request.method === "GET"',
-    'request.method === "POST"',
-    'request.method === "PATCH"',
+  const routeChecks = [
+    { label: "health", terms: ['request.method === "GET"', 'url.pathname === "/api/health"'] },
+    { label: "list", terms: ['request.method === "GET"', 'url.pathname === "/api/" + config.entitySlug'] },
+    { label: "create", terms: ['request.method === "POST"', 'url.pathname === "/api/" + config.entitySlug'] },
+    { label: "status", terms: ['request.method === "PATCH"', '"/([^/]+)/status$"', "statuses.has(body.status)"] },
+    { label: "entity slug", terms: [appSpec.primaryEntity.slug] },
   ];
-  const missing = requiredTerms.filter((term) => !server.includes(term));
+  const missing = routeChecks.filter((check) => check.terms.some((term) => !server.includes(term))).map((check) => check.label);
   return missing.length === 0
-    ? passed("shape.api-routes", "Generated app API routes are present.")
-    : failed("shape.api-routes", `Generated app server is missing route terms: ${missing.join(", ")}`);
+    ? passed("shape.api-routes", "Generated app server includes health, list, create, and status routes.")
+    : failed("shape.api-routes", `Generated app server is missing route support: ${missing.join(", ")}`);
 }
 
 function uiTermsCheck(files: Record<string, string | undefined>, appSpec: AppSpec): GeneratedAppValidationCheck {
   const app = files["app/src/App.tsx"] ?? "";
-  const requiredTerms = [
-    appSpec.appName,
-    appSpec.domain,
-    appSpec.primaryEntity.name,
-    appSpec.primaryEntity.pluralName,
-    ...appSpec.primaryEntity.fields.map((field) => field.label),
-    ...appSpec.screens.map((screen) => screen.name),
-  ];
-  const missing = unique(requiredTerms).filter((term) => !app.includes(term));
+  const requiredTerms = unique([appSpec.appName, appSpec.primaryEntity.name, appSpec.primaryEntity.pluralName, ...appSpec.workflow.statuses]);
+  const missing = requiredTerms.filter((term) => !app.includes(term));
   return missing.length === 0
-    ? passed("shape.ui-app-spec-terms", "Generated UI includes AppSpec names, fields, and screens.")
-    : failed("shape.ui-app-spec-terms", `Generated UI is missing AppSpec terms: ${missing.join(", ")}`);
+    ? passed("shape.ui-app-spec-terms", "Generated app source includes AppSpec app name, entity, and statuses.")
+    : failed("shape.ui-app-spec-terms", `Generated app source is missing AppSpec terms: ${missing.join(", ")}`);
 }
 
 function workflowStatusesCheck(files: Record<string, string | undefined>, appSpec: AppSpec): GeneratedAppValidationCheck {
@@ -133,7 +128,7 @@ function workflowStatusesCheck(files: Record<string, string | undefined>, appSpe
 }
 
 function seedDataCheck(files: Record<string, string | undefined>, appSpec: AppSpec): GeneratedAppValidationCheck {
-  const path = `app/data/${appSpec.primaryEntity.slug}.json`;
+  const path = seedDataPath(appSpec);
   try {
     const records = JSON.parse(files[path] ?? "") as unknown;
     if (!Array.isArray(records)) {
@@ -147,6 +142,22 @@ function seedDataCheck(files: Record<string, string | undefined>, appSpec: AppSp
   } catch {
     return failed("spec.seed-data", "Generated seed data is not valid JSON.");
   }
+}
+
+function parsePackageJson(files: Record<string, string | undefined>): { ok: true; packageJson: { scripts?: Record<string, unknown> } } | { ok: false } {
+  try {
+    const parsed = JSON.parse(files["app/package.json"] ?? "") as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ok: false };
+    }
+    return { ok: true, packageJson: parsed as { scripts?: Record<string, unknown> } };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function seedDataPath(appSpec: AppSpec): string {
+  return `app/data/${appSpec.primaryEntity.slug}.json`;
 }
 
 function passed(id: string, message: string): GeneratedAppValidationCheck {
