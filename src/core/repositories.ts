@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentActionRecord, AgentMessageRecord, Approval, Artifact, ContextPackage, Event, Run, RunStatus, Task, TaskStatus } from "../types.js";
 import { safeJoin } from "./paths.js";
 import { redactRecord, redactSecrets } from "./redact.js";
+import { atomicWriteJson, readJson, withRunStateLock } from "./state-io.js";
 import { transitionRun, transitionTask } from "./state-machines.js";
 
 export class LocalRunsRepo {
@@ -19,17 +20,21 @@ export class LocalRunsRepo {
   }
 
   async saveRun(run: Run): Promise<Run> {
-    await writeJson(this.path("run.json"), run);
+    await withRunStateLock(this.runRoot, async () => {
+      await atomicWriteJson(this.path("run.json"), run);
+    });
     return run;
   }
 
   async updateRunStatus(status: RunStatus, failureReason?: string): Promise<Run> {
-    const run = await this.getRun();
-    const updated = run.status === status
-      ? { ...run, failureReason: failureReason ?? run.failureReason, updatedAt: new Date().toISOString() }
-      : transitionRun(run, status, { failureReason });
-    await this.saveRun(updated);
-    return updated;
+    return withRunStateLock(this.runRoot, async () => {
+      const run = await readJson<Run>(this.path("run.json"));
+      const updated = run.status === status
+        ? { ...run, failureReason: failureReason ?? run.failureReason, updatedAt: new Date().toISOString() }
+        : transitionRun(run, status, { failureReason });
+      await atomicWriteJson(this.path("run.json"), updated);
+      return updated;
+    });
   }
 
   private path(relativePath: string): string {
@@ -41,9 +46,11 @@ export class LocalTasksRepo {
   constructor(private readonly runRoot: string) {}
 
   async createTask(task: Task): Promise<Task> {
-    const tasks = await this.listTasksByRun();
-    await this.saveTasks([...tasks.filter((candidate) => candidate.id !== task.id), task]);
-    return task;
+    return withRunStateLock(this.runRoot, async () => {
+      const tasks = await readJson<Task[]>(this.path("tasks.json"), []);
+      await this.writeTasks([...tasks.filter((candidate) => candidate.id !== task.id), task]);
+      return task;
+    });
   }
 
   async getTask(taskId: string): Promise<Task> {
@@ -59,52 +66,64 @@ export class LocalTasksRepo {
   }
 
   async updateTaskStatus(taskId: string, status: TaskStatus, failureReason?: string): Promise<Task> {
-    const tasks = await this.listTasksByRun();
-    const now = new Date().toISOString();
-    let updatedTask: Task | undefined;
-    const updatedTasks = tasks.map((task) => {
-      if (task.id !== taskId) {
-        return task;
+    return withRunStateLock(this.runRoot, async () => {
+      const tasks = await readJson<Task[]>(this.path("tasks.json"), []);
+      const now = new Date().toISOString();
+      let updatedTask: Task | undefined;
+      const updatedTasks = tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+        updatedTask = task.status === status
+          ? { ...task, failureReason: failureReason ?? task.failureReason, updatedAt: now }
+          : transitionTask(task, status, { failureReason });
+        return updatedTask;
+      });
+      if (!updatedTask) {
+        throw new Error(`Task not found: ${taskId}`);
       }
-      updatedTask = task.status === status
-        ? { ...task, failureReason: failureReason ?? task.failureReason, updatedAt: now }
-        : transitionTask(task, status, { failureReason });
+      await this.writeTasks(updatedTasks);
       return updatedTask;
     });
-    if (!updatedTask) {
-      throw new Error(`Task not found: ${taskId}`);
-    }
-    await this.saveTasks(updatedTasks);
-    return updatedTask;
   }
 
   async incrementTaskAttempt(taskId: string): Promise<Task> {
-    const tasks = await this.listTasksByRun();
-    const now = new Date().toISOString();
-    let updatedTask: Task | undefined;
-    const updatedTasks = tasks.map((task) => {
-      if (task.id !== taskId) {
-        return task;
+    return withRunStateLock(this.runRoot, async () => {
+      const tasks = await readJson<Task[]>(this.path("tasks.json"), []);
+      const now = new Date().toISOString();
+      let updatedTask: Task | undefined;
+      const updatedTasks = tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+        updatedTask = { ...task, attempts: task.attempts + 1, updatedAt: now };
+        return updatedTask;
+      });
+      if (!updatedTask) {
+        throw new Error(`Task not found: ${taskId}`);
       }
-      updatedTask = { ...task, attempts: task.attempts + 1, updatedAt: now };
+      await this.writeTasks(updatedTasks);
       return updatedTask;
     });
-    if (!updatedTask) {
-      throw new Error(`Task not found: ${taskId}`);
-    }
-    await this.saveTasks(updatedTasks);
-    return updatedTask;
   }
 
   async saveTask(task: Task): Promise<Task> {
-    const tasks = await this.listTasksByRun();
-    await this.saveTasks(tasks.map((candidate) => candidate.id === task.id ? task : candidate));
-    return task;
+    return withRunStateLock(this.runRoot, async () => {
+      const tasks = await readJson<Task[]>(this.path("tasks.json"), []);
+      await this.writeTasks(tasks.map((candidate) => candidate.id === task.id ? task : candidate));
+      return task;
+    });
   }
 
   async saveTasks(tasks: Task[]): Promise<Task[]> {
-    await writeJson(this.path("tasks.json"), tasks);
+    await withRunStateLock(this.runRoot, async () => {
+      await this.writeTasks(tasks);
+    });
     return tasks;
+  }
+
+  private async writeTasks(tasks: Task[]): Promise<void> {
+    await atomicWriteJson(this.path("tasks.json"), tasks);
   }
 
   private path(relativePath: string): string {
@@ -116,9 +135,11 @@ export class LocalArtifactsRepo {
   constructor(private readonly runRoot: string) {}
 
   async createArtifactRecord(artifact: Artifact): Promise<Artifact> {
-    const artifacts = await this.listArtifactsByRun();
-    await writeJson(this.path("artifacts.json"), [...artifacts.filter((candidate) => candidate.id !== artifact.id), artifact]);
-    return artifact;
+    return withRunStateLock(this.runRoot, async () => {
+      const artifacts = await readJson<Artifact[]>(this.path("artifacts.json"), []);
+      await atomicWriteJson(this.path("artifacts.json"), [...artifacts.filter((candidate) => candidate.id !== artifact.id), artifact]);
+      return artifact;
+    });
   }
 
   async listArtifactsByRun(): Promise<Artifact[]> {
@@ -134,9 +155,11 @@ export class LocalAgentActionsRepo {
   constructor(private readonly runRoot: string) {}
 
   async createAction(action: AgentActionRecord): Promise<AgentActionRecord> {
-    const actions = await this.listActionsByRun();
-    await writeJson(this.path("agent-actions.json"), [...actions.filter((candidate) => candidate.id !== action.id), action]);
-    return action;
+    return withRunStateLock(this.runRoot, async () => {
+      const actions = await readJson<AgentActionRecord[]>(this.path("agent-actions.json"), []);
+      await atomicWriteJson(this.path("agent-actions.json"), [...actions.filter((candidate) => candidate.id !== action.id), action]);
+      return action;
+    });
   }
 
   async listActionsByRun(): Promise<AgentActionRecord[]> {
@@ -152,9 +175,11 @@ export class LocalContextPackagesRepo {
   constructor(private readonly runRoot: string) {}
 
   async createContextPackage(contextPackage: ContextPackage): Promise<ContextPackage> {
-    const packages = await this.listContextPackagesByRun();
-    await writeJson(this.path("context-packages.json"), [...packages.filter((candidate) => candidate.id !== contextPackage.id), contextPackage]);
-    return contextPackage;
+    return withRunStateLock(this.runRoot, async () => {
+      const packages = await readJson<ContextPackage[]>(this.path("context-packages.json"), []);
+      await atomicWriteJson(this.path("context-packages.json"), [...packages.filter((candidate) => candidate.id !== contextPackage.id), contextPackage]);
+      return contextPackage;
+    });
   }
 
   async listContextPackagesByRun(): Promise<ContextPackage[]> {
@@ -170,9 +195,11 @@ export class LocalMessagesRepo {
   constructor(private readonly runRoot: string) {}
 
   async createMessage(message: AgentMessageRecord): Promise<AgentMessageRecord> {
-    const messages = await this.listMessagesByRun();
-    await writeJson(this.path("messages.json"), [...messages.filter((candidate) => candidate.id !== message.id), message]);
-    return message;
+    return withRunStateLock(this.runRoot, async () => {
+      const messages = await readJson<AgentMessageRecord[]>(this.path("messages.json"), []);
+      await atomicWriteJson(this.path("messages.json"), [...messages.filter((candidate) => candidate.id !== message.id), message]);
+      return message;
+    });
   }
 
   async listMessagesByRun(): Promise<AgentMessageRecord[]> {
@@ -232,9 +259,11 @@ export class LocalApprovalsRepo {
       status: input.status ?? "pending",
       notes: input.notes
     };
-    const approvals = await this.listApprovalsByRun();
-    await writeJson(this.path("approvals.json"), [...approvals.filter((candidate) => candidate.id !== approval.id), approval]);
-    return approval;
+    return withRunStateLock(this.runRoot, async () => {
+      const approvals = await readJson<Approval[]>(this.path("approvals.json"), []);
+      await atomicWriteJson(this.path("approvals.json"), [...approvals.filter((candidate) => candidate.id !== approval.id), approval]);
+      return approval;
+    });
   }
 
   async getApproval(approvalId: string): Promise<Approval> {
@@ -246,27 +275,29 @@ export class LocalApprovalsRepo {
   }
 
   async updateApprovalStatus(approvalId: string, status: Approval["status"], notes?: string): Promise<Approval> {
-    const approvals = await this.listApprovalsByRun();
-    const now = new Date().toISOString();
-    let updatedApproval: Approval | undefined;
-    const updatedApprovals = approvals.map((approval) => {
-      if (approval.id !== approvalId) {
-        return approval;
+    return withRunStateLock(this.runRoot, async () => {
+      const approvals = await readJson<Approval[]>(this.path("approvals.json"), []);
+      const now = new Date().toISOString();
+      let updatedApproval: Approval | undefined;
+      const updatedApprovals = approvals.map((approval) => {
+        if (approval.id !== approvalId) {
+          return approval;
+        }
+        updatedApproval = {
+          ...approval,
+          status,
+          notes: notes ?? approval.notes,
+          resolvedAt: now,
+          approver: "human"
+        };
+        return updatedApproval;
+      });
+      if (!updatedApproval) {
+        throw new Error(`Approval not found: ${approvalId}`);
       }
-      updatedApproval = {
-        ...approval,
-        status,
-        notes: notes ?? approval.notes,
-        resolvedAt: now,
-        approver: "human"
-      };
+      await atomicWriteJson(this.path("approvals.json"), updatedApprovals);
       return updatedApproval;
     });
-    if (!updatedApproval) {
-      throw new Error(`Approval not found: ${approvalId}`);
-    }
-    await writeJson(this.path("approvals.json"), updatedApprovals);
-    return updatedApproval;
   }
 
   async listApprovalsByRun(): Promise<Approval[]> {
@@ -276,20 +307,4 @@ export class LocalApprovalsRepo {
   private path(relativePath: string): string {
     return safeJoin(join(this.runRoot, "state"), relativePath);
   }
-}
-
-async function readJson<T>(path: string, fallback?: T): Promise<T> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch (error) {
-    if (fallback !== undefined) {
-      return fallback;
-    }
-    throw error;
-  }
-}
-
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }

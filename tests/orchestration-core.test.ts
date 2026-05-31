@@ -1,15 +1,16 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LocalApprovalsRepo, LocalArtifactsRepo, LocalEventsRepo, LocalRunsRepo, LocalTasksRepo } from "../src/core/repositories.js";
 import { areAllTasksTerminal, getReadyTasks, hasBlockedTasks, hasFailedTasks, markReadyTasks } from "../src/core/scheduler.js";
+import { atomicWriteJson } from "../src/core/state-io.js";
 import { canTransitionRun, canTransitionTask, transitionRun, transitionTask } from "../src/core/state-machines.js";
 import { compileAgentStepsToTasks } from "../src/core/task-compiler.js";
 import { compileAgentStepsToWorkflowGraph, validateWorkflowGraph, workflowGraphToTasks } from "../src/core/workflow-graph.js";
 import { ToolApprovalRequiredError, runCommandTool } from "../src/core/tools.js";
 import { agentSteps } from "../src/agents/steps.js";
-import type { Run, Task, ToolContext, Workspace } from "../src/types.js";
+import type { Artifact, Run, Task, ToolContext, Workspace } from "../src/types.js";
 
 describe("state machines", () => {
   it("validates task transitions and terminal states", () => {
@@ -99,6 +100,23 @@ describe("agent step compiler", () => {
   });
 });
 
+describe("state IO", () => {
+  it("writes JSON atomically with the existing pretty newline format", async () => {
+    const runRoot = await mkdtemp(join(tmpdir(), "agentsim-state-io-test-"));
+    const targetPath = join(runRoot, "state", "sample.json");
+
+    await atomicWriteJson(targetPath, { alpha: 1, nested: { beta: true } });
+
+    expect(await readFile(targetPath, "utf8")).toBe(`{
+  "alpha": 1,
+  "nested": {
+    "beta": true
+  }
+}
+`);
+  });
+});
+
 describe("local repositories", () => {
   it("persists and reloads run, task, artifact, event, message, and approval state", async () => {
     const runRoot = await mkdtemp(join(tmpdir(), "agentsim-repo-test-"));
@@ -141,6 +159,19 @@ describe("local repositories", () => {
     expect((await artifactsRepo.listArtifactsByRun())).toHaveLength(1);
     expect((await eventsRepo.listEventsByRun())[0]?.message).toContain("secret=[REDACTED]");
     expect((await approvalsRepo.listApprovalsByRun())[0]?.status).toBe("pending");
+  });
+
+  it("preserves concurrent snapshot writes to the same state collection", async () => {
+    const runRoot = await mkdtemp(join(tmpdir(), "agentsim-repo-concurrent-test-"));
+    const artifactsRepo = new LocalArtifactsRepo(runRoot);
+    const now = new Date().toISOString();
+    const artifacts = Array.from({ length: 25 }, (_, index) => createArtifact(`artifact-${index}`, now, runRoot));
+
+    await Promise.all(artifacts.map((artifact) => artifactsRepo.createArtifactRecord(artifact)));
+
+    expect((await artifactsRepo.listArtifactsByRun()).map((artifact) => artifact.id).sort()).toEqual(
+      artifacts.map((artifact) => artifact.id).sort()
+    );
   });
 });
 
@@ -219,6 +250,23 @@ function createRun(): Run {
     outputRoot: "outputs/run-1",
     createdAt: "2026-05-31T00:00:00.000Z",
     updatedAt: "2026-05-31T00:00:00.000Z"
+  };
+}
+
+function createArtifact(id: string, timestamp: string, runRoot: string): Artifact {
+  return {
+    id,
+    type: "requirements",
+    ownerAgentId: "scope-pm",
+    status: "approved",
+    workspacePath: join(runRoot, "workspace", `${id}.md`),
+    finalPackagePath: `planning/${id}.md`,
+    lineage: { inputArtifactIds: [] },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    reviewStatus: "not_required",
+    approvalStatus: "approved",
+    contentHash: `hash-${id}`
   };
 }
 

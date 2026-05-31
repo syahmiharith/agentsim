@@ -41,6 +41,40 @@ describe("scheduler-driven orchestrator", () => {
     expect(actions.every((action: { contextPackageId?: string; contextHash?: string }) => action.contextPackageId && action.contextHash)).toBe(true);
   });
 
+  it("preserves state from independent tasks that run concurrently", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-concurrent-"));
+
+    const result = await runOrchestrator({
+      goal: "Build a small intake tool",
+      outputRoot,
+      runId: "concurrent-run",
+      modelProvider: new MockModelProvider(),
+      maxConcurrentTasks: 2,
+      agentSteps: [
+        testStep("client-proposal", "proposal", [], "client/proposal.md"),
+        testStep("planning-requirements", "requirements", [], "planning/requirements.md")
+      ],
+      validateFinalPackage: async () => okValidation()
+    });
+
+    const runRoot = join(outputRoot, "concurrent-run");
+    const tasks = JSON.parse(await readFile(join(runRoot, "state", "tasks.json"), "utf8"));
+    const artifacts = JSON.parse(await readFile(join(runRoot, "state", "artifacts.json"), "utf8"));
+    const actions = JSON.parse(await readFile(join(runRoot, "state", "agent-actions.json"), "utf8"));
+    const messages = JSON.parse(await readFile(join(runRoot, "state", "messages.json"), "utf8"));
+    const contextPackages = JSON.parse(await readFile(join(runRoot, "state", "context-packages.json"), "utf8"));
+
+    expect(result.taskRun.status).toBe("COMPLETED");
+    expect(tasks.map((task: { id: string; status: string }) => [task.id, task.status]).sort()).toEqual([
+      ["client-proposal", "completed"],
+      ["planning-requirements", "completed"]
+    ]);
+    expect(artifacts.map((artifact: { type: string }) => artifact.type).sort()).toEqual(["proposal", "requirements"]);
+    expect(actions).toHaveLength(2);
+    expect(messages).toHaveLength(2);
+    expect(contextPackages).toHaveLength(2);
+  });
+
   it("retries a failed task and fails the run after max attempts", async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-orchestrator-fail-"));
     let attempts = 0;
