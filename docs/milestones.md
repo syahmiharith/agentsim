@@ -57,7 +57,7 @@ Current capabilities:
 - Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
 - Structured agent messages, agent action records, context packages, artifact lineage, decision logs, approval records, and event trace.
-- Generated runnable Vite React app package with local API and JSON persistence.
+- AppSpec-driven generated runnable Vite React app package with local API and JSON persistence.
 - Final package validation and `run-summary.json`.
 
 The next work should strengthen this spine rather than broaden the product.
@@ -74,6 +74,7 @@ Build:
 - Keep compiled `Task` state aligned with the existing `AgentStep` registry until the orchestrator fully replaces the static loop.
 - Keep the software-freelance workflow represented by `software-freelance-pack`.
 - Strengthen required artifact validation for final-package completeness.
+- Persist `state/app-spec.json`, `trace/app-spec.json`, and structured `trace/app-validation.json` for the current single-entity `crud-workflow` generated app.
 - Keep `run-summary.json` accurate with run status, package path, artifact count, validation result, and failures.
 - Keep `state/` files local and ignored as generated output.
 
@@ -81,6 +82,7 @@ Acceptance:
 
 - One command creates a complete delivery package.
 - Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, context packages, events, decisions, approvals, lineage, and run summary.
+- Every generated app has a valid M1 AppSpec trace and generated-app validation trace.
 - Every run has persisted run, task, artifact, message, context package, event, and approval state.
 - Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim graph`, `agentsim events`, `agentsim artifacts`, `agentsim approvals`, `agentsim contexts`, `agentsim context`, and `agentsim viewer`.
 - Approval-paused runs can continue with `agentsim approve` followed by `agentsim resume`.

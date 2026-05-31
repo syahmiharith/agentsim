@@ -13,7 +13,7 @@ describe("demo workflow", () => {
       goal: "Build an inventory request system for a flower company",
       outputRoot,
       runId: "test-run",
-      modelProvider: new MockModelProvider()
+      modelProvider: new MockModelProvider(),
     });
 
     expect(result.taskRun.status).toBe("COMPLETED");
@@ -48,11 +48,13 @@ describe("demo workflow", () => {
       "trace/approvals.json",
       "trace/decisions.json",
       "trace/domain-spec.json",
+      "trace/app-spec.json",
+      "trace/app-validation.json",
       "trace/domain-inference.json",
       "trace/workflow-graph.json",
       "trace/tool-registry.json",
       "trace/artifact-lineage.json",
-      "trace/run-summary.json"
+      "trace/run-summary.json",
     ];
 
     for (const relativePath of required) {
@@ -62,7 +64,11 @@ describe("demo workflow", () => {
     const lineage = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "artifact-lineage.json"), "utf8"));
     expect(lineage.artifacts.every((artifact: { contentHash?: string }) => Boolean(artifact.contentHash))).toBe(true);
     expect(lineage.artifacts.find((artifact: { type: string }) => artifact.type === "app").reviewStatus).toBe("passed");
-    expect(lineage.artifacts.every((artifact: { approvalStatus: string; reviewStatus: string }) => artifact.approvalStatus !== "approved" || artifact.reviewStatus !== "pending")).toBe(true);
+    expect(
+      lineage.artifacts.every(
+        (artifact: { approvalStatus: string; reviewStatus: string }) => artifact.approvalStatus !== "approved" || artifact.reviewStatus !== "pending",
+      ),
+    ).toBe(true);
 
     const events = await readFile(join(result.finalPackageDir, "trace", "events.jsonl"), "utf8");
     expect(events).toContain("run.completed");
@@ -74,9 +80,12 @@ describe("demo workflow", () => {
 
     const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
     expect(agentActions.actions).toHaveLength(result.artifacts.length);
-    expect(agentActions.actions.every((action: { status: string; outputArtifactId?: string; contextPackageId?: string; contextHash?: string }) =>
-      action.status === "completed" && Boolean(action.outputArtifactId) && Boolean(action.contextPackageId) && Boolean(action.contextHash)
-    )).toBe(true);
+    expect(
+      agentActions.actions.every(
+        (action: { status: string; outputArtifactId?: string; contextPackageId?: string; contextHash?: string }) =>
+          action.status === "completed" && Boolean(action.outputArtifactId) && Boolean(action.contextPackageId) && Boolean(action.contextHash),
+      ),
+    ).toBe(true);
 
     const contextPackages = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "context-packages.json"), "utf8"));
     expect(contextPackages.contextPackages).toHaveLength(agentActions.actions.length);
@@ -95,7 +104,15 @@ describe("demo workflow", () => {
     expect(appReadme).toContain("pnpm dev:web");
 
     const domainSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-spec.json"), "utf8"));
+    const appSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "app-spec.json"), "utf8"));
+    const appValidation = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "app-validation.json"), "utf8"));
     expect(domainSpec.appName).toBe("Inventory Request Desk");
+    expect(appSpec.appName).toBe("Inventory Request Desk");
+    expect(appSpec.appArchetype).toBe("crud-workflow");
+    expect(appSpec.primaryEntity.name).toBe("Inventory Request");
+    expect(appSpec.workflow.statuses).toEqual(domainSpec.workflowStatuses);
+    expect(appValidation.ok).toBe(true);
+    expect(appValidation.checks.some((check: { id: string }) => check.id === "shape.ui-app-spec-terms")).toBe(true);
 
     const runSummary = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "run-summary.json"), "utf8"));
     expect(runSummary.status).toBe("COMPLETED");
@@ -108,12 +125,15 @@ describe("demo workflow", () => {
     const stateContextPackages = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "context-packages.json"), "utf8"));
     const stateEvents = await readFile(join(outputRoot, "test-run", "state", "events.jsonl"), "utf8");
     const stateDomainSpec = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-spec.json"), "utf8"));
+    const stateAppSpec = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "app-spec.json"), "utf8"));
     const stateDomainInference = JSON.parse(await readFile(join(outputRoot, "test-run", "state", "domain-inference.json"), "utf8"));
     const traceDomainInference = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-inference.json"), "utf8"));
     const workflowGraph = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "workflow-graph.json"), "utf8"));
     const toolRegistry = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "tool-registry.json"), "utf8"));
     expect(stateRun.status).toBe("completed");
     expect(stateDomainSpec.appName).toBe("Inventory Request Desk");
+    expect(stateAppSpec.appName).toBe("Inventory Request Desk");
+    expect(stateAppSpec.primaryEntity.slug).toBe("requests");
     expect(stateDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
     expect(traceDomainInference).toMatchObject({ matchedPresetId: "inventory-request", fallbackUsed: false, needsClarification: false });
     expect(workflowGraph.nodes.find((node: { id: string }) => node.id === "builder-app")).toMatchObject({ kind: "app_generation" });
@@ -131,13 +151,17 @@ describe("demo workflow", () => {
       goal: "Build a booking system for a barber shop",
       outputRoot,
       runId: "barber-run",
-      modelProvider: new MockModelProvider()
+      modelProvider: new MockModelProvider(),
     });
 
     const domainSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-spec.json"), "utf8"));
+    const appSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "app-spec.json"), "utf8"));
     expect(domainSpec.appName).toBe("Barber Booking Desk");
     expect(domainSpec.primaryEntity.name).toBe("Booking");
     expect(domainSpec.workflowStatuses).toContain("Confirmed");
+    expect(appSpec.appName).toBe("Barber Booking Desk");
+    expect(appSpec.primaryEntity.name).toBe("Booking");
+    expect(appSpec.workflow.statuses).toContain("Confirmed");
 
     const requirements = await readFile(join(result.finalPackageDir, "planning", "requirements.md"), "utf8");
     expect(requirements).toContain("service");
@@ -149,6 +173,7 @@ describe("demo workflow", () => {
     expect(app).toContain("service");
     expect(app).toContain("appointmentDateTime");
     expect(app).toContain("Confirmed");
+    expect(app).toContain("Appointment date/time");
 
     const packageJson = await readFile(join(result.finalPackageDir, "app", "package.json"), "utf8");
     expect(packageJson).toContain("barber-booking-desk");
@@ -162,14 +187,14 @@ describe("demo workflow", () => {
   it.each([
     ["Build a clinic appointment system", "Clinic Appointment Desk", "Appointment", "Scheduled"],
     ["Build a restaurant reservation system", "Restaurant Reservation Desk", "Reservation", "Seated"],
-    ["Build an equipment checkout system for a university club", "Club Equipment Checkout", "Checkout", "Overdue"]
+    ["Build an equipment checkout system for a university club", "Club Equipment Checkout", "Checkout", "Overdue"],
   ])("creates distinct domain packages for %s", async (goal, appName, entityName, status) => {
     const outputRoot = await mkdtemp(join(tmpdir(), "agentsim-domain-test-"));
     const result = await runDemo({
       goal,
       outputRoot,
       runId: appName.toLowerCase().replace(/\s+/g, "-"),
-      modelProvider: new MockModelProvider()
+      modelProvider: new MockModelProvider(),
     });
 
     const domainSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-spec.json"), "utf8"));
@@ -193,19 +218,23 @@ describe("demo workflow", () => {
       goal: "Build an inventory request system for a flower company",
       outputRoot,
       runId: "live-step-run",
-      modelProvider: provider
+      modelProvider: provider,
     });
 
     expect(result.taskRun.status).toBe("COMPLETED");
-    expect(provider.requests.map((request) => request.purpose)).toEqual(expect.arrayContaining([
-      "run-brief",
-      "agent-step:client-proposal",
-      "agent-step:planning-requirements",
-      "agent-step:review-qa-report",
-      "agent-step:delivery-user-guide"
-    ]));
+    expect(provider.requests.map((request) => request.purpose)).toEqual(
+      expect.arrayContaining([
+        "run-brief",
+        "agent-step:client-proposal",
+        "agent-step:planning-requirements",
+        "agent-step:review-qa-report",
+        "agent-step:delivery-user-guide",
+      ]),
+    );
     expect(provider.requests).toHaveLength(17);
-    expect(provider.requests.find((request) => request.purpose === "agent-step:planning-requirements")?.prompt).toContain("Structured messages for this agent action");
+    expect(provider.requests.find((request) => request.purpose === "agent-step:planning-requirements")?.prompt).toContain(
+      "Structured messages for this agent action",
+    );
 
     const requirements = await readFile(join(result.finalPackageDir, "planning", "requirements.md"), "utf8");
     expect(requirements).toContain("Live artifact for agent-step:planning-requirements");
@@ -228,7 +257,7 @@ describe("demo workflow", () => {
       goal: `Build an inventory request system for ${secret}`,
       outputRoot,
       runId: "secret-redaction-run",
-      modelProvider: provider
+      modelProvider: provider,
     });
 
     expect(result.taskRun.goal).not.toContain(secret);
@@ -249,7 +278,7 @@ describe("demo workflow", () => {
       outputRoot,
       runId,
       repoPath: repoRoot,
-      modelProvider: new MockModelProvider()
+      modelProvider: new MockModelProvider(),
     });
 
     const traceFiles = await listFiles(join(result.finalPackageDir, "trace"));
@@ -277,24 +306,22 @@ class RecordingLiveProvider implements ModelProvider {
     this.requests.push(request);
     return {
       content: `# Live artifact for ${request.purpose}\n\nGenerated from ${request.prompt.length} prompt characters.`,
-      model: "recording-model"
+      model: "recording-model",
     };
   }
 }
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = join(root, entry.name);
-    return entry.isDirectory() ? listFiles(path) : [path];
-  }));
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(root, entry.name);
+      return entry.isDirectory() ? listFiles(path) : [path];
+    }),
+  );
   return files.flat();
 }
 
 function pathVariants(path: string): string[] {
-  return [...new Set([
-    path,
-    path.replaceAll("\\", "/"),
-    path.replaceAll("/", "\\")
-  ])];
+  return [...new Set([path, path.replaceAll("\\", "/"), path.replaceAll("/", "\\")])];
 }

@@ -1,38 +1,44 @@
 import { basename } from "node:path";
+import { appSpecFromDomainSpec } from "../app-spec/app-spec-from-domain.js";
+import type { AppSpec } from "../app-spec/app-spec.js";
 import type { DomainSpec } from "../domain/domain-spec.js";
 import type { Workspace, WorkspaceDriver } from "../types.js";
 
 export async function writeGeneratedApp(workspace: Workspace, driver: WorkspaceDriver, spec: DomainSpec): Promise<void> {
-  assertSupportedDomainSpec(spec);
-  for (const [path, content] of Object.entries(renderGeneratedAppFiles(workspace, spec))) {
+  for (const [path, content] of Object.entries(renderGeneratedAppFiles(workspace, appSpecFromDomainSpec(spec)))) {
     await driver.writeFile(workspace, path, content);
   }
 }
 
-export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spec: DomainSpec): Record<string, string> {
-  assertSupportedDomainSpec(spec);
+export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spec: AppSpec | DomainSpec): Record<string, string> {
+  const appSpec = isAppSpec(spec) ? spec : appSpecFromDomainSpec(spec);
+  assertSupportedAppSpec(appSpec);
   return {
-    "app/package.json": appPackageJson(spec),
-    "app/index.html": indexHtml(spec),
+    "app/package.json": appPackageJson(appSpec),
+    "app/index.html": indexHtml(appSpec),
     "app/tsconfig.json": appTsconfig(),
     "app/vite.config.ts": viteConfig(),
-    "app/server.js": serverJs(spec),
-    [`app/data/${spec.primaryEntity.slug}.json`]: `${JSON.stringify(seedRecords(spec), null, 2)}\n`,
+    "app/server.js": serverJs(appSpec),
+    [`app/data/${appSpec.primaryEntity.slug}.json`]: `${JSON.stringify(seedRecords(appSpec), null, 2)}\n`,
     "app/src/main.tsx": mainTsx(),
-    "app/src/App.tsx": appTsx(spec),
+    "app/src/App.tsx": appTsx(appSpec),
     "app/src/styles.css": stylesCss(),
-    "app/README.md": appReadme(workspace.runId, spec),
+    "app/README.md": appReadme(workspace.runId, appSpec),
   };
 }
 
-function assertSupportedDomainSpec(spec: DomainSpec): void {
+function isAppSpec(spec: AppSpec | DomainSpec): spec is AppSpec {
+  return "schemaVersion" in spec && spec.schemaVersion === 1 && spec.appArchetype === "crud-workflow";
+}
+
+function assertSupportedAppSpec(spec: AppSpec): void {
   const appArchetype = spec.appArchetype as string | undefined;
-  if (appArchetype && appArchetype !== "simple-workflow") {
-    throw new Error(`Unsupported domain app archetype: ${appArchetype}`);
+  if (appArchetype !== "crud-workflow") {
+    throw new Error(`Unsupported app archetype: ${appArchetype}`);
   }
 }
 
-function appPackageJson(spec: DomainSpec): string {
+function appPackageJson(spec: AppSpec): string {
   return `${JSON.stringify(
     {
       name: spec.appSlug,
@@ -63,7 +69,7 @@ function appPackageJson(spec: DomainSpec): string {
   )}\n`;
 }
 
-function indexHtml(spec: DomainSpec): string {
+function indexHtml(spec: AppSpec): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -134,7 +140,7 @@ createRoot(document.getElementById("root")!).render(
 `;
 }
 
-function appTsx(spec: DomainSpec): string {
+function appTsx(spec: AppSpec): string {
   const config = {
     appName: spec.appName,
     domain: spec.domain,
@@ -142,12 +148,13 @@ function appTsx(spec: DomainSpec): string {
     primaryEntityPluralName: spec.primaryEntity.pluralName,
     entitySlug: spec.primaryEntity.slug,
     collectionKey: spec.primaryEntity.slug,
-    initialStatus: spec.workflowStatuses[0] ?? "Requested",
+    initialStatus: spec.workflow.initialStatus,
     fields: spec.primaryEntity.fields,
-    statuses: spec.workflowStatuses,
+    statuses: spec.workflow.statuses,
     targetUsers: spec.targetUsers,
     screens: spec.screens,
     coreActions: spec.coreActions,
+    summaryMetrics: spec.summaryMetrics,
   };
 
   return `import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -174,8 +181,9 @@ interface AppConfig {
   fields: FieldConfig[];
   statuses: string[];
   targetUsers: string[];
-  screens: Array<{ name: string; purpose: string; actions: string[] }>;
+  screens: Array<{ id: string; name: string; purpose: string; kind: string; actions: string[] }>;
   coreActions: string[];
+  summaryMetrics: Array<{ id: string; label: string; type: string; status?: string }>;
 }
 
 interface RecordItem extends Record<string, FormValue> {
@@ -669,15 +677,15 @@ dd {
 `;
 }
 
-function serverJs(spec: DomainSpec): string {
+function serverJs(spec: AppSpec): string {
   const config = {
     appName: spec.appName,
     entitySlug: spec.primaryEntity.slug,
     collectionKey: spec.primaryEntity.slug,
     primaryEntityName: spec.primaryEntity.name,
-    initialStatus: spec.workflowStatuses[0] ?? "Requested",
+    initialStatus: spec.workflow.initialStatus,
     fields: spec.primaryEntity.fields,
-    statuses: spec.workflowStatuses,
+    statuses: spec.workflow.statuses,
   };
 
   return `import { createServer } from "node:http";
@@ -819,7 +827,7 @@ server.listen(port, "127.0.0.1", () => {
 `;
 }
 
-function appReadme(runId: string, spec: DomainSpec): string {
+function appReadme(runId: string, spec: AppSpec): string {
   return `# ${spec.appName}
 
 Generated by Agentsim run \`${basename(runId)}\`.
@@ -853,12 +861,12 @@ pnpm build
 `;
 }
 
-function seedRecords(spec: DomainSpec): Array<Record<string, string | number>> {
+function seedRecords(spec: AppSpec): Array<Record<string, string | number>> {
   const now = new Date().toISOString();
   return spec.seedRecords.map((record, index) => ({
     id: `seed-${index + 1}`,
     ...record,
-    status: String(record.status ?? spec.workflowStatuses[0] ?? "Requested"),
+    status: String(record.status ?? spec.workflow.initialStatus),
     createdAt: now,
     updatedAt: now,
   }));
