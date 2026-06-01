@@ -3,7 +3,21 @@ import { parseArgs } from "../src/cli.js";
 
 describe("CLI parsing", () => {
   it("parses run goal and mock mode", () => {
-    const options = parseArgs(["run", "Build", "inventory", "--mock", "--run-id", "test-run", "--repo", ".", "--allow-commands", "--command-policy", "dev", "--max-concurrent-tasks", "2"]);
+    const options = parseArgs([
+      "run",
+      "Build",
+      "inventory",
+      "--mock",
+      "--run-id",
+      "test-run",
+      "--repo",
+      ".",
+      "--allow-commands",
+      "--command-policy",
+      "dev",
+      "--max-concurrent-tasks",
+      "2",
+    ]);
     expect(options.command).toBe("run");
     expect(options.goal).toBe("Build inventory");
     expect(options.providerSelection).toBe("mock");
@@ -74,6 +88,10 @@ describe("CLI parsing", () => {
     const viewer = parseArgs(["viewer", "test-run"]);
     expect(viewer.command).toBe("viewer");
     expect(viewer.runId).toBe("test-run");
+
+    const viewerWithPort = parseArgs(["viewer", "test-run", "--output-root", "custom-outputs", "--port", "4321"]);
+    expect(viewerWithPort.outputRoot).toBe("custom-outputs");
+    expect(viewerWithPort.port).toBe(4321);
 
     const tools = parseArgs(["tools"]);
     expect(tools.command).toBe("tools");

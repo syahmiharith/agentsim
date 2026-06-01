@@ -175,7 +175,7 @@ function parseJsonObject(content: string): Record<string, unknown> {
     }
     return parsed;
   } catch (error) {
-    throw new Error(`ProductBrief extraction returned invalid JSON: ${error instanceof Error ? error.message : "unknown parse error"}`);
+    throw new Error(`ProductBrief extraction returned invalid JSON: ${error instanceof Error ? error.message : "unknown parse error"}`, { cause: error });
   }
 }
 

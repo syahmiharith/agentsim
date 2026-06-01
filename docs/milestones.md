@@ -52,7 +52,7 @@ Current capabilities:
 - State transition helpers for run and task lifecycles.
 - Risk-aware local tool wrappers for workspace files, artifacts, commands, and human approval requests.
 - CLI inspection commands for runs, events, artifacts, tasks, approvals, and context packages.
-- Static local run viewer and built-in tool registry inspection commands.
+- Read-only local web run viewer and built-in tool registry inspection commands.
 - Optional read-only repo context import for local runs.
 - Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
@@ -138,10 +138,16 @@ Build:
 - Markdown artifact preview and app file tree.
 - Decision and approval status surfaces.
 
+Current implementation note:
+
+- `agentsim viewer <runId> --port 4317` starts a dependency-free read-only server on `127.0.0.1`.
+- The viewer normalizes run state, review files, trace previews, and the final-package tree into a `RunViewerModel`.
+- File preview endpoints are restricted to final-package-relative paths.
+
 Acceptance:
 
 - A user can inspect a run without opening the filesystem manually.
-- The UI follows the product flow: Goal -> Progress -> Decisions -> Artifacts -> Review -> Final Package.
+- The UI follows the product flow: Goal -> Progress -> Decisions -> Artifacts -> Review -> Trace -> Final Package.
 - The UI does not expose agent chat as the core experience.
 
 Do not build:

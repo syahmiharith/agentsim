@@ -32,7 +32,7 @@ Current capability:
 - generate planning, technical, review, client handoff, trace, and app prototype files
 - run in deterministic mock mode without provider keys
 - persist run, task, artifact, event, message, and approval state under each run
-- inspect workflow graph, artifacts, context, tools, and static viewer output from the CLI
+- inspect workflow graph, artifacts, context, tools, and a local read-only run viewer from the CLI
 - import optional read-only repo context for local package generation
 - inspect and resume local runs from the CLI after approvals are resolved
 - run a deterministic mock eval suite across several freelance software prompts
@@ -45,7 +45,7 @@ Current limitations:
 - approvals, workspace execution, command execution, repair loops, and provider routing are still early
 - the workflow graph is local-first; it is not a distributed scheduler
 - generated-app install/build command checks are disabled by default and require explicit opt-in
-- no hosted service, dashboard, or production deployment automation exists yet
+- no hosted service, SaaS dashboard, or production deployment automation exists yet
 
 ## Problem
 
@@ -155,6 +155,7 @@ Agentsim currently has a CLI-based proof of concept:
 - artifact lineage, decision logs, approval records, and event traces
 - AppSpec-driven runnable generated app package for prompt-specific single-entity `crud-workflow`, `booking-lite`, and `inventory-lite` prototypes
 - optional generated-app execution evidence for syntax, install, build, health, list, create, and status-transition checks under the local dev command policy
+- dependency-free local run viewer for Goal, Progress, Decisions, Artifacts, Review, Trace, and Final Package inspection
 
 The current generated app contract is intentionally narrow: live mode may use a model to extract a schema-constrained product brief, but app code is still rendered by controlled local renderers with explicit capability manifests. Broader behavior such as external calendar sync, production inventory math, auth, deployment, payments, and multi-entity relations is captured as deferred unless a renderer explicitly supports it.
 
@@ -228,9 +229,11 @@ pnpm agentsim artifacts <runId>
 pnpm agentsim approvals <runId>
 pnpm agentsim graph <runId>
 pnpm agentsim contexts <runId>
-pnpm agentsim viewer <runId>
+pnpm agentsim viewer <runId> --port 4317
 pnpm agentsim tools
 ```
+
+`agentsim viewer` starts a read-only HTTP server on `127.0.0.1`. It serves a normalized run model and final-package previews from the selected run output. It does not provide chat, approval, rerun, deployment, or editing controls.
 
 Approval records can be resolved locally:
 
@@ -277,6 +280,7 @@ Useful entry points:
 - `src/types.ts` - core contracts
 - `src/agents/` - role definitions and artifact-producing step registry
 - `src/core/` - artifacts, events, hashing, redaction, path safety, repositories, scheduler, tools, and workspace behavior
+- `src/viewer/` - read-only local run viewer model, HTTP server, HTML, CSS, and browser-side rendering
 - `src/providers/` - model provider boundary
 - `src/templates/` - generated delivery package templates
 - `tests/` - workflow, CLI, hashing, and redaction coverage

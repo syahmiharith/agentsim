@@ -5,16 +5,43 @@ import { Command } from "commander";
 import { z } from "zod";
 import { loadDotEnv } from "./config.js";
 import { LocalApprovalsRepo, LocalRunsRepo, LocalTasksRepo } from "./core/repositories.js";
-import { generateStaticViewer } from "./core/viewer.js";
 import { builtInToolRegistry } from "./core/tool-registry.js";
-import { loadRunInspection, renderApprovals, renderArtifacts, renderContext, renderContexts, renderEvents, renderGraph, renderInspect, renderTasks } from "./inspection.js";
+import {
+  loadRunInspection,
+  renderApprovals,
+  renderArtifacts,
+  renderContext,
+  renderContexts,
+  renderEvents,
+  renderGraph,
+  renderInspect,
+  renderTasks,
+} from "./inspection.js";
 import { createModelProvider, type ProviderSelection } from "./providers/index.js";
 import { startDashboard } from "./tui/run-inspector.js";
 import { resolveRunRoot, resumeOrchestrator } from "./orchestrator.js";
 import { runDemo } from "./workflow.js";
+import { startViewerServer } from "./viewer/viewer-server.js";
 import type { CommandPolicyLevel } from "./types.js";
 
-type CliCommand = "run" | "demo" | "dashboard" | "tui" | "inspect" | "events" | "artifacts" | "tasks" | "graph" | "approvals" | "contexts" | "context" | "viewer" | "tools" | "approve" | "reject" | "resume";
+type CliCommand =
+  | "run"
+  | "demo"
+  | "dashboard"
+  | "tui"
+  | "inspect"
+  | "events"
+  | "artifacts"
+  | "tasks"
+  | "graph"
+  | "approvals"
+  | "contexts"
+  | "context"
+  | "viewer"
+  | "tools"
+  | "approve"
+  | "reject"
+  | "resume";
 
 interface CliOptions {
   command?: CliCommand | string;
@@ -28,10 +55,31 @@ interface CliOptions {
   allowCommands?: boolean;
   commandPolicyLevel?: CommandPolicyLevel;
   maxConcurrentTasks?: number;
+  port?: number;
 }
 
 const cliOptionsSchema = z.object({
-  command: z.enum(["run", "demo", "dashboard", "tui", "inspect", "events", "artifacts", "tasks", "graph", "approvals", "contexts", "context", "viewer", "tools", "approve", "reject", "resume"]).optional(),
+  command: z
+    .enum([
+      "run",
+      "demo",
+      "dashboard",
+      "tui",
+      "inspect",
+      "events",
+      "artifacts",
+      "tasks",
+      "graph",
+      "approvals",
+      "contexts",
+      "context",
+      "viewer",
+      "tools",
+      "approve",
+      "reject",
+      "resume",
+    ])
+    .optional(),
   goal: z.string().trim().min(1).optional(),
   providerSelection: z.enum(["auto", "mock", "live"]),
   outputRoot: z.string().trim().min(1),
@@ -41,7 +89,8 @@ const cliOptionsSchema = z.object({
   repoPath: z.string().trim().min(1).optional(),
   allowCommands: z.boolean().optional(),
   commandPolicyLevel: z.enum(["strict", "dev", "unsafe-local"]).optional(),
-  maxConcurrentTasks: z.number().int().positive().optional()
+  maxConcurrentTasks: z.number().int().positive().optional(),
+  port: z.number().int().positive().optional(),
 });
 
 export async function main(argv: string[]): Promise<void> {
@@ -66,7 +115,7 @@ export async function main(argv: string[]): Promise<void> {
   if (options.command === "dashboard" || options.command === "tui") {
     await startDashboard({
       outputRoot: resolve(options.outputRoot),
-      runId: options.runId ?? options.goal
+      runId: options.runId ?? options.goal,
     });
     return;
   }
@@ -83,28 +132,31 @@ export async function main(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const result = await generateStaticViewer(resolveRunRoot(resolve(options.outputRoot), runId));
-    console.log(`Viewer: ${result.path}`);
+    const server = await startViewerServer({ runRoot: resolveRunRoot(resolve(options.outputRoot), runId), port: options.port });
+    console.log(`Viewer: ${server.url}`);
+    console.log("Press Ctrl+C to stop.");
+    await server.closed;
     return;
   }
 
   if (isInspectionCommand(options.command)) {
     const model = await loadRunInspection(resolve(options.outputRoot), options.runId ?? options.goal);
-    const output = options.command === "inspect"
-      ? renderInspect(model)
-      : options.command === "events"
-        ? renderEvents(model)
-        : options.command === "artifacts"
-          ? renderArtifacts(model)
-          : options.command === "tasks"
-            ? renderTasks(model)
-            : options.command === "graph"
-              ? renderGraph(model)
-              : options.command === "approvals"
-                ? renderApprovals(model)
-                : options.command === "contexts"
-                  ? renderContexts(model)
-                  : renderContext(model, options.contextPackageId);
+    const output =
+      options.command === "inspect"
+        ? renderInspect(model)
+        : options.command === "events"
+          ? renderEvents(model)
+          : options.command === "artifacts"
+            ? renderArtifacts(model)
+            : options.command === "tasks"
+              ? renderTasks(model)
+              : options.command === "graph"
+                ? renderGraph(model)
+                : options.command === "approvals"
+                  ? renderApprovals(model)
+                  : options.command === "contexts"
+                    ? renderContexts(model)
+                    : renderContext(model, options.contextPackageId);
     console.log(output);
     return;
   }
@@ -119,7 +171,7 @@ export async function main(argv: string[]): Promise<void> {
       outputRoot: resolve(options.outputRoot),
       runId: options.runId,
       approvalId: options.approvalId,
-      status: options.command === "approve" ? "approved" : "rejected"
+      status: options.command === "approve" ? "approved" : "rejected",
     });
     console.log(`Approval ${options.approvalId} ${options.command === "approve" ? "approved" : "rejected"}.`);
     return;
@@ -140,7 +192,7 @@ export async function main(argv: string[]): Promise<void> {
       modelProvider: provider,
       allowCommands: options.allowCommands,
       commandPolicyLevel: options.commandPolicyLevel,
-      maxConcurrentTasks: options.maxConcurrentTasks
+      maxConcurrentTasks: options.maxConcurrentTasks,
     });
     console.log(`Agentsim run resumed.`);
     console.log(`Run ID: ${result.taskRun.id}`);
@@ -150,7 +202,7 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   if (!options.goal) {
-    console.error("Missing goal. Example: agentsim run \"Build an inventory request system for a flower company\"");
+    console.error('Missing goal. Example: agentsim run "Build an inventory request system for a flower company"');
     process.exitCode = 1;
     return;
   }
@@ -164,7 +216,7 @@ export async function main(argv: string[]): Promise<void> {
     repoPath: options.repoPath,
     allowCommands: options.allowCommands,
     commandPolicyLevel: options.commandPolicyLevel,
-    maxConcurrentTasks: options.maxConcurrentTasks
+    maxConcurrentTasks: options.maxConcurrentTasks,
   });
 
   console.log(`Agentsim run completed.`);
@@ -176,7 +228,7 @@ export async function main(argv: string[]): Promise<void> {
 export function parseArgs(argv: string[]): CliOptions {
   let parsed: CliOptions = {
     providerSelection: "auto",
-    outputRoot: "outputs"
+    outputRoot: "outputs",
   };
 
   const program = new Command();
@@ -186,7 +238,7 @@ export function parseArgs(argv: string[]): CliOptions {
     .allowExcessArguments(false)
     .configureOutput({
       writeOut: () => undefined,
-      writeErr: () => undefined
+      writeErr: () => undefined,
     });
 
   addRunCommand(program, "run", (options) => {
@@ -246,16 +298,40 @@ export function parseArgs(argv: string[]): CliOptions {
 }
 
 function isSupportedCommand(command: string | undefined): command is CliCommand {
-  return command === "run" || command === "demo" || command === "dashboard" || command === "tui" ||
-    command === "inspect" || command === "events" || command === "artifacts" || command === "tasks" ||
-    command === "graph" || command === "approvals" || command === "contexts" || command === "context" ||
-    command === "viewer" || command === "tools" ||
-    command === "approve" || command === "reject" || command === "resume";
+  return (
+    command === "run" ||
+    command === "demo" ||
+    command === "dashboard" ||
+    command === "tui" ||
+    command === "inspect" ||
+    command === "events" ||
+    command === "artifacts" ||
+    command === "tasks" ||
+    command === "graph" ||
+    command === "approvals" ||
+    command === "contexts" ||
+    command === "context" ||
+    command === "viewer" ||
+    command === "tools" ||
+    command === "approve" ||
+    command === "reject" ||
+    command === "resume"
+  );
 }
 
-function isInspectionCommand(command: string | undefined): command is "inspect" | "events" | "artifacts" | "tasks" | "graph" | "approvals" | "contexts" | "context" {
-  return command === "inspect" || command === "events" || command === "artifacts" || command === "tasks" ||
-    command === "graph" || command === "approvals" || command === "contexts" || command === "context";
+function isInspectionCommand(
+  command: string | undefined,
+): command is "inspect" | "events" | "artifacts" | "tasks" | "graph" | "approvals" | "contexts" | "context" {
+  return (
+    command === "inspect" ||
+    command === "events" ||
+    command === "artifacts" ||
+    command === "tasks" ||
+    command === "graph" ||
+    command === "approvals" ||
+    command === "contexts" ||
+    command === "context"
+  );
 }
 
 function addRunCommand(program: Command, name: "run" | "demo", onParse: (options: CliOptions) => void): void {
@@ -270,25 +346,39 @@ function addRunCommand(program: Command, name: "run" | "demo", onParse: (options
     .option("--allow-commands", "allow approved run_command tool calls")
     .option("--command-policy <level>", "command policy: strict, dev, unsafe-local", "strict")
     .option("--max-concurrent-tasks <count>", "maximum ready tasks to execute at once", parsePositiveInt)
-    .action((goalParts: string[], flags: { mock?: boolean; live?: boolean; outDir: string; runId?: string; repo?: string; allowCommands?: boolean; commandPolicy: CommandPolicyLevel; maxConcurrentTasks?: number }) => {
-      if (flags.mock && flags.live) {
-        throw new Error("Choose only one provider mode: --mock or --live.");
-      }
-      if (flags.commandPolicy === "unsafe-local" && !flags.allowCommands) {
-        throw new Error("--command-policy unsafe-local requires --allow-commands.");
-      }
-      onParse({
-        command: name,
-        goal: goalParts.join(" ").trim() || undefined,
-        providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
-        outputRoot: flags.outDir,
-        runId: flags.runId,
-        repoPath: flags.repo,
-        allowCommands: flags.allowCommands,
-        commandPolicyLevel: flags.commandPolicy,
-        maxConcurrentTasks: flags.maxConcurrentTasks
-      });
-    });
+    .action(
+      (
+        goalParts: string[],
+        flags: {
+          mock?: boolean;
+          live?: boolean;
+          outDir: string;
+          runId?: string;
+          repo?: string;
+          allowCommands?: boolean;
+          commandPolicy: CommandPolicyLevel;
+          maxConcurrentTasks?: number;
+        },
+      ) => {
+        if (flags.mock && flags.live) {
+          throw new Error("Choose only one provider mode: --mock or --live.");
+        }
+        if (flags.commandPolicy === "unsafe-local" && !flags.allowCommands) {
+          throw new Error("--command-policy unsafe-local requires --allow-commands.");
+        }
+        onParse({
+          command: name,
+          goal: goalParts.join(" ").trim() || undefined,
+          providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
+          outputRoot: flags.outDir,
+          runId: flags.runId,
+          repoPath: flags.repo,
+          allowCommands: flags.allowCommands,
+          commandPolicyLevel: flags.commandPolicy,
+          maxConcurrentTasks: flags.maxConcurrentTasks,
+        });
+      },
+    );
 }
 
 function addDashboardCommand(program: Command, name: "dashboard" | "tui", onParse: (options: CliOptions) => void): void {
@@ -301,12 +391,16 @@ function addDashboardCommand(program: Command, name: "dashboard" | "tui", onPars
         command: name,
         goal: runId,
         providerSelection: "auto",
-        outputRoot: flags.outDir
+        outputRoot: flags.outDir,
       });
     });
 }
 
-function addInspectionCommand(program: Command, name: "inspect" | "events" | "artifacts" | "tasks" | "graph" | "approvals" | "contexts", onParse: (options: CliOptions) => void): void {
+function addInspectionCommand(
+  program: Command,
+  name: "inspect" | "events" | "artifacts" | "tasks" | "graph" | "approvals" | "contexts",
+  onParse: (options: CliOptions) => void,
+): void {
   program
     .command(name)
     .argument("[runId]", "run id to inspect")
@@ -317,7 +411,7 @@ function addInspectionCommand(program: Command, name: "inspect" | "events" | "ar
         goal: runId,
         runId,
         providerSelection: "auto",
-        outputRoot: flags.outDir
+        outputRoot: flags.outDir,
       });
     });
 }
@@ -327,27 +421,28 @@ function addViewerCommand(program: Command, onParse: (options: CliOptions) => vo
     .command("viewer")
     .argument("[runId]", "run id to render")
     .option("--out-dir <dir>", "output root directory", "outputs")
-    .action((runId: string | undefined, flags: { outDir: string }) => {
+    .option("--output-root <dir>", "output root directory")
+    .option("--port <port>", "local viewer port", parsePort)
+    .action((runId: string | undefined, flags: { outDir: string; outputRoot?: string; port?: number }) => {
       onParse({
         command: "viewer",
         goal: runId,
         runId,
         providerSelection: "auto",
-        outputRoot: flags.outDir
+        outputRoot: flags.outputRoot ?? flags.outDir,
+        port: flags.port,
       });
     });
 }
 
 function addToolsCommand(program: Command, onParse: (options: CliOptions) => void): void {
-  program
-    .command("tools")
-    .action(() => {
-      onParse({
-        command: "tools",
-        providerSelection: "auto",
-        outputRoot: "outputs"
-      });
+  program.command("tools").action(() => {
+    onParse({
+      command: "tools",
+      providerSelection: "auto",
+      outputRoot: "outputs",
     });
+  });
 }
 
 function addContextCommand(program: Command, onParse: (options: CliOptions) => void): void {
@@ -363,7 +458,7 @@ function addContextCommand(program: Command, onParse: (options: CliOptions) => v
         runId,
         contextPackageId,
         providerSelection: "auto",
-        outputRoot: flags.outDir
+        outputRoot: flags.outDir,
       });
     });
 }
@@ -380,7 +475,7 @@ function addApprovalCommand(program: Command, name: "approve" | "reject", onPars
         runId,
         approvalId,
         providerSelection: "auto",
-        outputRoot: flags.outDir
+        outputRoot: flags.outDir,
       });
     });
 }
@@ -395,24 +490,29 @@ function addResumeCommand(program: Command, onParse: (options: CliOptions) => vo
     .option("--allow-commands", "allow approved run_command tool calls")
     .option("--command-policy <level>", "command policy: strict, dev, unsafe-local", "strict")
     .option("--max-concurrent-tasks <count>", "maximum ready tasks to execute at once", parsePositiveInt)
-    .action((runId: string, flags: { mock?: boolean; live?: boolean; outDir: string; allowCommands?: boolean; commandPolicy: CommandPolicyLevel; maxConcurrentTasks?: number }) => {
-      if (flags.mock && flags.live) {
-        throw new Error("Choose only one provider mode: --mock or --live.");
-      }
-      if (flags.commandPolicy === "unsafe-local" && !flags.allowCommands) {
-        throw new Error("--command-policy unsafe-local requires --allow-commands.");
-      }
-      onParse({
-        command: "resume",
-        goal: runId,
-        runId,
-        providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
-        outputRoot: flags.outDir,
-        allowCommands: flags.allowCommands,
-        commandPolicyLevel: flags.commandPolicy,
-        maxConcurrentTasks: flags.maxConcurrentTasks
-      });
-    });
+    .action(
+      (
+        runId: string,
+        flags: { mock?: boolean; live?: boolean; outDir: string; allowCommands?: boolean; commandPolicy: CommandPolicyLevel; maxConcurrentTasks?: number },
+      ) => {
+        if (flags.mock && flags.live) {
+          throw new Error("Choose only one provider mode: --mock or --live.");
+        }
+        if (flags.commandPolicy === "unsafe-local" && !flags.allowCommands) {
+          throw new Error("--command-policy unsafe-local requires --allow-commands.");
+        }
+        onParse({
+          command: "resume",
+          goal: runId,
+          runId,
+          providerSelection: flags.live ? "live" : flags.mock ? "mock" : "auto",
+          outputRoot: flags.outDir,
+          allowCommands: flags.allowCommands,
+          commandPolicyLevel: flags.commandPolicy,
+          maxConcurrentTasks: flags.maxConcurrentTasks,
+        });
+      },
+    );
 }
 
 function parsePositiveInt(value: string): number {
@@ -423,10 +523,18 @@ function parsePositiveInt(value: string): number {
   return parsed;
 }
 
+function parsePort(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  return parsed;
+}
+
 function renderTools(): string {
-  return builtInToolRegistry.tools.map((tool) =>
-    `${tool.name} | ${tool.riskLevel} | approval=${String(tool.requiresApproval)} | ${tool.description}`
-  ).join("\n");
+  return builtInToolRegistry.tools
+    .map((tool) => `${tool.name} | ${tool.riskLevel} | approval=${String(tool.requiresApproval)} | ${tool.description}`)
+    .join("\n");
 }
 
 async function selectResumeProviderSelection(outputRoot: string, runId: string, selection: ProviderSelection): Promise<ProviderSelection> {
@@ -447,7 +555,7 @@ async function resolveApproval(input: { outputRoot: string; runId: string; appro
     await tasksRepo.updateTaskStatus(
       approval.taskId,
       input.status === "approved" ? "ready" : "failed",
-      input.status === "rejected" ? "Approval rejected." : undefined
+      input.status === "rejected" ? "Approval rejected." : undefined,
     );
     await runsRepo.updateRunStatus(input.status === "approved" ? "running" : "failed", input.status === "rejected" ? "Approval rejected." : undefined);
   }
@@ -466,7 +574,7 @@ function printUsage(): void {
   agentsim approvals [runId] [--out-dir outputs]
   agentsim contexts [runId] [--out-dir outputs]
   agentsim context <runId> <contextPackageId> [--out-dir outputs]
-  agentsim viewer [runId] [--out-dir outputs]
+  agentsim viewer [runId] [--out-dir outputs] [--port 4317]
   agentsim tools
   agentsim approve <runId> <approvalId> [--out-dir outputs]
   agentsim reject <runId> <approvalId> [--out-dir outputs]

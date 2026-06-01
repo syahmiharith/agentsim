@@ -1,5 +1,5 @@
 import type { ModelProvider } from "../types.js";
-import { parseProductBriefJson, type ProductBrief, type ProductBriefParseResult } from "./product-brief.js";
+import { parseProductBriefJson, type ProductBriefParseResult } from "./product-brief.js";
 
 export interface ProductBriefExtractionResult extends ProductBriefParseResult {
   model: string;

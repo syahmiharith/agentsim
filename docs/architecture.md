@@ -19,7 +19,7 @@ CLI
 -> workspace driver
 -> final package
 -> validation
--> dashboard inspection
+-> CLI and local viewer inspection
 ```
 
 The current workflow starts from a client-style goal, derives a prompt-specific product brief, infers a software-freelance domain spec, derives a single-entity AppSpec, generates durable artifacts, writes a runnable app prototype from that AppSpec, records decisions and approvals, validates the final package, and writes trace files.
@@ -53,6 +53,7 @@ The current workflow starts from a client-style goal, derives a prompt-specific 
 | `src/core/workspace.ts`                | Provides the local filesystem workspace driver.                                                                                      |
 | `src/providers/`                       | Provides mock and Chat Completions-compatible model providers.                                                                       |
 | `src/tui/run-inspector.ts`             | Inspects completed runs from local outputs.                                                                                          |
+| `src/viewer/`                          | Builds a normalized read-only run viewer model and serves the local web viewer on `127.0.0.1`.                                       |
 | `tests/`                               | Captures executable expectations for CLI parsing, workflow output, domain packs, validation, hashing, redaction, and TUI inspection. |
 
 ## Core Contracts
@@ -113,7 +114,7 @@ pnpm agentsim graph <runId>
 pnpm agentsim approvals <runId>
 pnpm agentsim contexts <runId>
 pnpm agentsim context <runId> <contextPackageId>
-pnpm agentsim viewer <runId>
+pnpm agentsim viewer <runId> --port 4317
 pnpm agentsim tools
 pnpm agentsim approve <runId> <approvalId>
 pnpm agentsim reject <runId> <approvalId>
@@ -122,6 +123,8 @@ pnpm eval:mock
 ```
 
 `run` and `demo` also accept `--repo <path>` for bounded read-only repo summary import, `--max-concurrent-tasks <n>` for local scheduler batching, and the command-execution flags `--allow-commands --command-policy <strict|dev|unsafe-local>`.
+
+`viewer` starts a dependency-free local HTTP server bound to `127.0.0.1`. It exposes the run through Goal, Progress, Decisions, Artifacts, Review, Trace, and Final Package views. The viewer is read-only and does not expose chat, approval, rerun, deployment, or editing controls.
 
 ## Workflow Layer
 
@@ -231,6 +234,22 @@ outputs/{runId}/state/
 ```
 
 The `state/` files are for local resume, inspection, approvals, and scheduler state. The `final-package/trace/` files remain the reviewer-facing debug output.
+
+## Viewer Layer
+
+`src/viewer/load-run-viewer-model.ts` normalizes persisted run state, review files, trace files, command previews, and the final-package tree into a `RunViewerModel`. The model tolerates missing optional trace files so older runs can still be inspected.
+
+`src/viewer/viewer-server.ts` serves the local viewer with no external dependencies. It binds to `127.0.0.1`, serves static in-memory assets, and exposes only read-only endpoints:
+
+```text
+GET /
+GET /api/model
+GET /api/file?path=...
+GET /api/artifact?type=...
+GET /api/final-package-tree
+```
+
+File reads are restricted to paths inside `final-package/` and use the same path-safety helpers as the workspace layer.
 
 ## Context Package Layer
 
