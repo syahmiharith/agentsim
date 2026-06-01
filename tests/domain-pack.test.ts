@@ -23,6 +23,7 @@ describe("softwareFreelancePack", () => {
         "review/qa-report.md",
         "app/package.json",
         "app/src/App.tsx",
+        "app/test-report.md",
       ]),
     );
     expect(softwareFreelancePack.requiredTraceFiles).toEqual(
@@ -34,6 +35,7 @@ describe("softwareFreelancePack", () => {
         "trace/context-eval.json",
         "trace/decisions.json",
         "trace/approvals.json",
+        "trace/product-brief.json",
         "trace/app-spec.json",
         "trace/app-validation.json",
         "trace/artifact-lineage.json",

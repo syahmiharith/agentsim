@@ -181,6 +181,9 @@ function traceContentFor(relativePath: string, spec: DomainSpec): string {
   if (relativePath === "trace/context-eval.json") {
     return JSON.stringify({ evaluation: { requiredCoverageOk: true, provenanceOk: true, failures: [] } }, null, 2);
   }
+  if (relativePath === "trace/app-spec.json") {
+    return JSON.stringify(appSpecFromDomainSpec(spec), null, 2);
+  }
   if (relativePath === "trace/events.jsonl") {
     return `${JSON.stringify({ name: "run.completed" })}\n`;
   }

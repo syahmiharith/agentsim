@@ -113,11 +113,14 @@ ${bulletList([
 
 ## Out of Scope
 
-- User authentication and permissions.
-- Production database migrations.
-- External integration automation.
-- Email/SMS notifications.
-- Hosted deployment automation.
+${bulletList([
+  "User authentication and permissions.",
+  "Production database migrations.",
+  "External integration automation.",
+  "Email/SMS notifications.",
+  "Hosted deployment automation.",
+  ...deferredFeatureItems(spec),
+])}
 
 ## MVP Constraint
 
@@ -134,6 +137,10 @@ ${bulletList([
   "Target users can share one local app for the first review.",
   ...spec.assumptions,
 ])}
+
+## Unresolved Questions
+
+${bulletList(unresolvedQuestionItems(spec))}
 `;
 }
 
@@ -264,6 +271,7 @@ export function qaReport(appValidation?: GeneratedAppValidation | string): strin
 - Verified core planning and technical artifacts are present.
 - Verified generated app includes package metadata, source files, local API, and README.
 - Verified generated app AppSpec terms, workflow statuses, package scripts, and seed data.
+- Verified generated app command-check report is included in the app package.
 - Verified event trace and artifact lineage are exported.
 
 ## Generated App Validation
@@ -311,6 +319,7 @@ ${validationNote}
 - Data is stored in a local JSON file, not a production database.
 - The UI is optimized for workflow review, not polished brand presentation.
 - ${spec.primaryEntity.name} history and notifications are not implemented yet.
+${bulletList(deferredFeatureItems(spec))}
 `;
 }
 
@@ -336,6 +345,7 @@ A reviewed local MVP package for: ${spec.sourceGoal}
 - Are these the right status values?
 - Who should be allowed to update workflow status?
 - Which integration matters most after this local prototype?
+${bulletList((spec.unresolvedQuestions ?? []).map((question) => (question.endsWith("?") ? question : `${question}?`)))}
 
 ## Production Notes
 
@@ -380,6 +390,7 @@ ${bulletList(spec.workflowStatuses)}
 - Data is stored locally in the generated app folder.
 - There are no user accounts or permissions yet.
 - Notifications, integrations, and production deployment are outside this MVP.
+${bulletList(deferredFeatureItems(spec))}
 `;
 }
 
@@ -412,6 +423,15 @@ function bulletList(items: string[]): string {
 
 function fieldList(fields: FieldSpec[]): string {
   return bulletList(fields.map((field) => `${field.label} (${field.type}${field.required ? ", required" : ", optional"})`));
+}
+
+function deferredFeatureItems(spec: DomainSpec): string[] {
+  return (spec.deferredFeatures ?? []).map((feature) => `Deferred: ${feature}`);
+}
+
+function unresolvedQuestionItems(spec: DomainSpec): string[] {
+  const questions = spec.unresolvedQuestions ?? [];
+  return questions.length > 0 ? questions : ["No blocking open questions were identified for the local prototype."];
 }
 
 function fieldTypeLine(field: FieldSpec): string {

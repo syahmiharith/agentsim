@@ -49,7 +49,7 @@ export async function runEvalBatch(options: EvalRunnerOptions): Promise<EvalRepo
         goal: evalCase.prompt,
         outputRoot,
         runId,
-        modelProvider: createModelProvider(options.mode)
+        modelProvider: createModelProvider(options.mode),
       });
       return await scoreEvalRun(evalCase, runId, result, { durationMs: Date.now() - runStartedAt, runtimeApi: options.runtimeApi });
     } catch (error) {
@@ -64,7 +64,7 @@ export async function runEvalBatch(options: EvalRunnerOptions): Promise<EvalRepo
     environment: await getReportEnvironment(),
     options,
     summary: summarizeEvalResults(results),
-    results: results.sort((left, right) => left.caseId.localeCompare(right.caseId) || left.runId.localeCompare(right.runId))
+    results: results.sort((left, right) => left.caseId.localeCompare(right.caseId) || left.runId.localeCompare(right.runId)),
   };
   await writeReports(resolve(options.output), report, Date.now() - startedAt);
   return report;
@@ -78,14 +78,14 @@ function parseArgs(argv: string[]): EvalRunnerOptions {
     repeat: 1,
     concurrency: 1,
     adapter: "agentsim",
-    runtimeApi: false
+    runtimeApi: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
     switch (arg) {
       case "--suite":
-        options.suite = readChoice(next, ["smoke", "domain", "all"], "--suite") as EvalRunnerOptions["suite"];
+        options.suite = readChoice(next, ["smoke", "domain", "unseen-simple-apps", "all"], "--suite") as EvalRunnerOptions["suite"];
         index += 1;
         break;
       case "--mode":
@@ -158,16 +158,39 @@ function renderMarkdownReport(report: EvalReport): string {
     "",
     "| Case | Run ID | Hard Gate | Quality | Duration | Category | Failures |",
     "| --- | --- | --- | ---: | ---: | --- | --- |",
-    ...report.results.map((result) =>
-      `| ${escapeCell(result.caseId)} | ${result.runId} | ${result.hardGatePassed ? "pass" : "fail"} | ${result.qualityScore.toFixed(3)} | ${result.durationMs}ms | ${result.failureCategory} | ${escapeCell(result.failures.map((item) => item.message).join("; ") || "none")} |`
+    ...report.results.map(
+      (result) =>
+        `| ${escapeCell(result.caseId)} | ${result.runId} | ${result.hardGatePassed ? "pass" : "fail"} | ${result.qualityScore.toFixed(3)} | ${result.durationMs}ms | ${result.failureCategory} | ${escapeCell(result.failures.map((item) => item.message).join("; ") || "none")} |`,
     ),
-    ""
+    "",
   ].join("\n");
 }
 
 function renderCsvReport(report: EvalReport): string {
   const rows = [
-    ["caseId", "suite", "difficulty", "runId", "hardGatePassed", "accepted", "qualityScore", "durationMs", "failureCategory", "failureCount", "warningCount", "errorCount", "commandChecksRun", "apiBehaviorPresent", "seedDataPresent", "domainInferencePresent", "domainMatchedPresetId", "domainInferenceConfidence", "domainFallbackUsed", "domainNeedsClarification", "prompt"],
+    [
+      "caseId",
+      "suite",
+      "difficulty",
+      "runId",
+      "hardGatePassed",
+      "accepted",
+      "qualityScore",
+      "durationMs",
+      "failureCategory",
+      "failureCount",
+      "warningCount",
+      "errorCount",
+      "commandChecksRun",
+      "apiBehaviorPresent",
+      "seedDataPresent",
+      "domainInferencePresent",
+      "domainMatchedPresetId",
+      "domainInferenceConfidence",
+      "domainFallbackUsed",
+      "domainNeedsClarification",
+      "prompt",
+    ],
     ...report.results.map((result) => [
       result.caseId,
       result.suite,
@@ -189,37 +212,39 @@ function renderCsvReport(report: EvalReport): string {
       result.domainInferenceConfidence === undefined ? "" : String(result.domainInferenceConfidence),
       result.domainFallbackUsed === undefined ? "" : String(result.domainFallbackUsed),
       result.domainNeedsClarification === undefined ? "" : String(result.domainNeedsClarification),
-      result.prompt
-    ])
+      result.prompt,
+    ]),
   ];
   return `${rows.map((row) => row.map(csvCell).join(",")).join("\n")}\n`;
 }
 
 function expandRepeats(cases: EvalCase[], repeat: number): Array<{ evalCase: EvalCase; repeatIndex: number; caseIndex: number }> {
-  return Array.from({ length: repeat }, (_, repeatIndex) =>
-    cases.map((evalCase, caseIndex) => ({ evalCase, repeatIndex, caseIndex }))
-  ).flat();
+  return Array.from({ length: repeat }, (_, repeatIndex) => cases.map((evalCase, caseIndex) => ({ evalCase, repeatIndex, caseIndex }))).flat();
 }
 
 async function runWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await worker(items[currentIndex]);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await worker(items[currentIndex]);
+      }
+    }),
+  );
   return results;
 }
 
 function createRuntimeFailure(evalCase: EvalCase, runId: string, finalPackagePath: string, durationMs: number, error: unknown): EvalCaseResult {
-  const failures: EvalFailure[] = [{
-    code: "runtime_error",
-    message: error instanceof Error ? error.message : "Unknown eval failure.",
-    severity: "error"
-  }];
+  const failures: EvalFailure[] = [
+    {
+      code: "runtime_error",
+      message: error instanceof Error ? error.message : "Unknown eval failure.",
+      severity: "error",
+    },
+  ];
   return {
     caseId: evalCase.id,
     suite: evalCase.suite,
@@ -264,7 +289,7 @@ function createRuntimeFailure(evalCase: EvalCase, runId: string, finalPackagePat
     qualityScore: 0,
     durationMs,
     failureCategory: "runtime",
-    failures
+    failures,
   };
 }
 
@@ -273,7 +298,7 @@ async function getReportEnvironment(): Promise<EvalReport["environment"]> {
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
-    agentSimVersion: await readPackageVersion()
+    agentSimVersion: await readPackageVersion(),
   };
 }
 
@@ -330,7 +355,7 @@ function readPositiveInteger(value: string | undefined, flag: string): number {
 }
 
 function csvCell(value: string): string {
-  return `"${value.replace(/"/g, "\"\"")}"`;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function escapeCell(value: string): string {
@@ -343,15 +368,17 @@ function isMain(): boolean {
 
 if (isMain()) {
   loadDotEnv();
-  runEvalBatch(parseArgs(process.argv.slice(2))).then((report) => {
-    console.log(`AgentSim evals: ${report.summary.passed}/${report.summary.total} passed.`);
-    console.log(`Average quality score: ${report.summary.averageQualityScore.toFixed(3)}`);
-    console.log(`Report: ${resolve(report.options.output, "latest.json")}`);
-    if (report.summary.failed > 0) {
+  runEvalBatch(parseArgs(process.argv.slice(2)))
+    .then((report) => {
+      console.log(`AgentSim evals: ${report.summary.passed}/${report.summary.total} passed.`);
+      console.log(`Average quality score: ${report.summary.averageQualityScore.toFixed(3)}`);
+      console.log(`Report: ${resolve(report.options.output, "latest.json")}`);
+      if (report.summary.failed > 0) {
+        process.exitCode = 1;
+      }
+    })
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
-    }
-  }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+    });
 }

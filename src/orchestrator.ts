@@ -10,6 +10,7 @@ import { FileArtifactStore } from "./core/artifacts.js";
 import { assembleContextPackage, evaluateContextPackages, validateContextPackage } from "./core/context.js";
 import { CompositeEventStore, JsonlEventStore } from "./core/events.js";
 import { validateFinalPackage as defaultValidateFinalPackage } from "./core/final-package-validation.js";
+import { renderGeneratedAppTestReport, runGeneratedAppExecutionChecks } from "./core/generated-app-execution.js";
 import { validateGeneratedApp, type GeneratedAppValidation } from "./core/generated-app-validation.js";
 import { safeJoin } from "./core/paths.js";
 import { redactSecrets } from "./core/redact.js";
@@ -36,6 +37,8 @@ import type { DomainInferenceResult } from "./domain/domain-inference.js";
 import type { DomainSpec } from "./domain/domain-spec.js";
 import { softwareFreelancePack } from "./domain/software-freelance-pack.js";
 import { renderGeneratedAppFiles } from "./templates/app.js";
+import { extractProductBriefWithModel, type ProductBriefExtractionResult } from "./domain/product-brief-extraction.js";
+import { productBriefFromDomainSpec, productBriefToDomainSpec, type ProductBrief } from "./domain/product-brief.js";
 import type {
   AgentActionRecord,
   AgentContext,
@@ -113,6 +116,8 @@ interface OrchestratorRuntime {
   appSpec: AppSpec;
   appValidation?: GeneratedAppValidation;
   domainInference: DomainInferenceResult;
+  productBrief: ProductBrief;
+  productBriefExtraction?: ProductBriefExtractionResult;
   repoContext?: RepoContextSummary;
   workflowGraph: WorkflowGraph;
   commandPolicy: CommandPolicy;
@@ -164,8 +169,13 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
   const messagesRepo = new LocalMessagesRepo(workspace.rootDir);
   const approvalsRepo = new LocalApprovalsRepo(workspace.rootDir);
   const domainPack = options.domainPack ?? softwareFreelancePack;
-  const domainInference = inferWithMetadata(domainPack, safeGoal);
-  const domainSpec = domainInference.spec;
+  const productBriefExtraction =
+    options.modelProvider.mode === "live" ? await extractProductBriefWithModel({ goal: safeGoal, modelProvider: options.modelProvider }) : undefined;
+  const domainInference = productBriefExtraction
+    ? domainInferenceFromProductBrief(productBriefExtraction.brief, productBriefExtraction.warnings)
+    : inferWithMetadata(domainPack, safeGoal);
+  const domainSpec = productBriefExtraction ? productBriefToDomainSpec(productBriefExtraction.brief, safeGoal) : domainInference.spec;
+  const productBrief = productBriefExtraction?.brief ?? productBriefFromDomainSpec(domainSpec);
   const appSpec = deriveValidAppSpec(domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
   const commandPolicy = resolveCommandPolicy(options.commandPolicyLevel ?? "strict");
@@ -214,6 +224,8 @@ export async function runOrchestrator(options: RunOrchestratorOptions): Promise<
     domainSpec,
     appSpec,
     domainInference,
+    productBrief,
+    productBriefExtraction,
     repoContext,
     workflowGraph,
     commandPolicy,
@@ -317,6 +329,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
   const artifactStore = new FileArtifactStore(workspace, artifacts);
   const domainPack = options.domainPack ?? softwareFreelancePack;
   const domainSpec = await loadPersistedDomainSpec(runRoot, domainPack, existingRun.userGoal);
+  const productBrief = await loadPersistedProductBrief(runRoot, domainSpec);
   const domainInference = await loadPersistedDomainInference(runRoot, domainPack, existingRun.userGoal, domainSpec);
   const appSpec = await loadPersistedAppSpec(runRoot, domainSpec);
   const steps = options.agentSteps ?? defaultAgentSteps;
@@ -366,6 +379,7 @@ export async function resumeOrchestrator(options: Omit<RunOrchestratorOptions, "
     domainSpec,
     appSpec,
     domainInference,
+    productBrief,
     repoContext,
     workflowGraph,
     commandPolicy,
@@ -554,6 +568,11 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
       applied.push("trace/domain-spec.json");
     }
 
+    if (failures.some((failure) => failure.includes("trace/product-brief.json"))) {
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/product-brief.json"), JSON.stringify(runtime.productBrief, null, 2), "utf8");
+      applied.push("trace/product-brief.json");
+    }
+
     if (failures.some((failure) => failure.includes("trace/app-spec.json"))) {
       await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/app-spec.json"), JSON.stringify(runtime.appSpec, null, 2), "utf8");
       applied.push("trace/app-spec.json");
@@ -606,7 +625,17 @@ async function executeFixTask(runtime: OrchestratorRuntime, task: Task, failures
         await writeFile(safeJoin(runtime.workspace.finalPackageDir, relativePath), content, "utf8");
         await runtime.workspaceDriver.writeFile(runtime.workspace, relativePath, content);
       }
-      runtime.appValidation = await validateGeneratedApp(runtime.workspace.finalPackageDir, runtime.appSpec);
+      const executionReport = await runGeneratedAppExecutionChecks({
+        workspace: runtime.workspace,
+        workspaceDriver: runtime.workspaceDriver,
+        commandPolicy: runtime.commandPolicy,
+        allowCommands: runtime.allowCommands,
+        appSpec: runtime.appSpec,
+      });
+      const testReport = renderGeneratedAppTestReport(executionReport);
+      await writeFile(safeJoin(runtime.workspace.finalPackageDir, "app/test-report.md"), testReport, "utf8");
+      await runtime.workspaceDriver.writeFile(runtime.workspace, "app/test-report.md", testReport);
+      runtime.appValidation = await validateGeneratedApp(runtime.workspace.finalPackageDir, runtime.appSpec, executionReport);
       await writeFile(safeJoin(runtime.workspace.finalPackageDir, "trace/app-validation.json"), JSON.stringify(runtime.appValidation, null, 2), "utf8");
       applied.push("app/");
     }
@@ -759,6 +788,8 @@ export async function executeTask(runtime: OrchestratorRuntime, taskId: string, 
     workspace: runtime.workspace,
     workspaceDriver: runtime.workspaceDriver,
     artifactsByType: runtime.artifactsByType,
+    allowCommands: runtime.allowCommands,
+    commandPolicy: runtime.commandPolicy,
     contextPackage,
     abortSignal: attempt?.abortSignal,
     tools: createToolRuntime({
@@ -986,6 +1017,7 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
   };
 
   await runtime.runsRepo.createRun(runState);
+  await writeFile(safeJoin(runtime.workspace.rootDir, "state/product-brief.json"), JSON.stringify(runtime.productBrief, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/domain-spec.json"), JSON.stringify(runtime.domainSpec, null, 2), "utf8");
   await writeFile(safeJoin(runtime.workspace.rootDir, "state/app-spec.json"), JSON.stringify(runtime.appSpec, null, 2), "utf8");
   await writeFile(
@@ -1027,6 +1059,18 @@ async function initializeRun(runtime: OrchestratorRuntime, taskRun: TaskRun): Pr
     title: "Domain inference",
     rationale: `Inferred ${runtime.domainSpec.domain} from the user goal and selected ${runtime.domainSpec.primaryEntity.name} as the primary workflow entity.`,
     selectedOption: runtime.domainSpec.appName,
+  });
+  runtime.decisions.push({
+    id: "product-brief",
+    runId: runtime.runId,
+    madeAt: new Date().toISOString(),
+    madeBy: "system",
+    title: "Product brief extraction",
+    rationale:
+      runtime.modelProvider.mode === "live"
+        ? "Extracted a schema-constrained ProductBrief with the live model provider before deriving DomainSpec and AppSpec."
+        : "Derived a ProductBrief from deterministic mock domain inference for reproducible no-key runs.",
+    selectedOption: runtime.productBrief.appArchetype,
   });
   runtime.decisions.push({
     id: "model-provider",
@@ -1227,6 +1271,7 @@ async function writeTraceFiles(runtime: OrchestratorRuntime): Promise<void> {
   const traceApprovals = mergeApprovalsById(await runtime.approvalsRepo.listApprovalsByRun());
 
   await writeTraceJson(runtime, "trace/domain-spec.json", runtime.domainSpec);
+  await writeTraceJson(runtime, "trace/product-brief.json", runtime.productBrief);
   await writeTraceJson(runtime, "trace/app-spec.json", runtime.appSpec);
   if (runtime.appValidation) {
     await writeTraceJson(runtime, "trace/app-validation.json", runtime.appValidation);
@@ -1363,6 +1408,16 @@ async function loadPersistedDomainSpec(runRoot: string, domainPack: DomainPack, 
   }
 }
 
+async function loadPersistedProductBrief(runRoot: string, domainSpec: DomainSpec): Promise<ProductBrief> {
+  try {
+    return JSON.parse(await readFile(safeJoin(runRoot, "state/product-brief.json"), "utf8")) as ProductBrief;
+  } catch {
+    const brief = productBriefFromDomainSpec(domainSpec);
+    await writeFile(safeJoin(runRoot, "state/product-brief.json"), JSON.stringify(brief, null, 2), "utf8");
+    return brief;
+  }
+}
+
 async function loadPersistedAppSpec(runRoot: string, domainSpec: DomainSpec): Promise<AppSpec> {
   try {
     const persisted = JSON.parse(await readFile(safeJoin(runRoot, "state/app-spec.json"), "utf8")) as AppSpec;
@@ -1397,6 +1452,18 @@ async function loadPersistedRepoContext(runRoot: string): Promise<RepoContextSum
   } catch {
     return undefined;
   }
+}
+
+function domainInferenceFromProductBrief(brief: ProductBrief, warnings: string[]): DomainInferenceResult {
+  return {
+    spec: productBriefToDomainSpec(brief, brief.sourceGoal),
+    confidence: 0.8,
+    matchedPresetId: "model-product-brief",
+    matchedKeywords: [],
+    warnings,
+    needsClarification: false,
+    fallbackUsed: false,
+  };
 }
 
 function inferWithMetadata(domainPack: DomainPack, goal: string): DomainInferenceResult {

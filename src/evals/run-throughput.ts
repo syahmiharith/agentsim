@@ -12,19 +12,23 @@ export function summarizeThroughput(results: EvalCaseResult[], wallClockMs: numb
   for (const result of results) {
     failureCategories[result.failureCategory] = (failureCategories[result.failureCategory] ?? 0) + 1;
   }
-  const qualityAdjustedAccepted = results
-    .filter((result) => result.accepted)
-    .reduce((sum, result) => sum + result.qualityScore, 0);
+  const qualityAdjustedAccepted = results.filter((result) => result.accepted).reduce((sum, result) => sum + result.qualityScore, 0);
   return {
     totalRuns: results.length,
     acceptedRuns,
     acceptanceRate: round(acceptedRuns / Math.max(1, results.length)),
     wallClockMs,
-    p50DurationMs: percentile(results.map((result) => result.durationMs), 50),
-    p95DurationMs: percentile(results.map((result) => result.durationMs), 95),
+    p50DurationMs: percentile(
+      results.map((result) => result.durationMs),
+      50,
+    ),
+    p95DurationMs: percentile(
+      results.map((result) => result.durationMs),
+      95,
+    ),
     qualityAdjustedPackagesPerHour: round(qualityAdjustedAccepted / Math.max(wallClockMs / 3_600_000, 1 / 3_600_000)),
     retries,
-    failureCategories
+    failureCategories,
   };
 }
 
@@ -35,14 +39,14 @@ function parseArgs(argv: string[]): EvalRunnerOptions {
     output: "outputs/evals",
     repeat: 3,
     concurrency: 4,
-    adapter: "agentsim"
+    adapter: "agentsim",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
     switch (arg) {
       case "--suite":
-        options.suite = readChoice(next, ["smoke", "domain", "all"], "--suite") as EvalSuite | "all";
+        options.suite = readChoice(next, ["smoke", "domain", "unseen-simple-apps", "all"], "--suite") as EvalSuite | "all";
         index += 1;
         break;
       case "--mode":
@@ -100,8 +104,10 @@ function renderMarkdown(summary: ThroughputSummary): string {
     "## Failure Categories",
     "",
     categories || "- none: 0",
-    ""
-  ].filter((line) => line !== "").join("\n");
+    "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 function readChoice(value: string | undefined, choices: string[], flag: string): string {
@@ -148,17 +154,19 @@ if (isMain()) {
   loadDotEnv();
   const options = parseArgs(process.argv.slice(2));
   const startedAt = Date.now();
-  runEvalBatch(options).then(async (report) => {
-    const summary = summarizeThroughput(report.results, Date.now() - startedAt);
-    await writeThroughputReport(options.output, summary);
-    console.log(`AgentSim throughput: ${summary.acceptedRuns}/${summary.totalRuns} accepted.`);
-    console.log(`Quality-adjusted packages/hour: ${summary.qualityAdjustedPackagesPerHour.toFixed(3)}`);
-    console.log(`Report: ${resolve(options.output, "throughput-latest.json")}`);
-    if (summary.acceptedRuns < summary.totalRuns) {
+  runEvalBatch(options)
+    .then(async (report) => {
+      const summary = summarizeThroughput(report.results, Date.now() - startedAt);
+      await writeThroughputReport(options.output, summary);
+      console.log(`AgentSim throughput: ${summary.acceptedRuns}/${summary.totalRuns} accepted.`);
+      console.log(`Quality-adjusted packages/hour: ${summary.qualityAdjustedPackagesPerHour.toFixed(3)}`);
+      console.log(`Report: ${resolve(options.output, "throughput-latest.json")}`);
+      if (summary.acceptedRuns < summary.totalRuns) {
+        process.exitCode = 1;
+      }
+    })
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
-    }
-  }).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+    });
 }

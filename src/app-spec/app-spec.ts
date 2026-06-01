@@ -1,4 +1,4 @@
-export type AppArchetype = "crud-workflow";
+export type AppArchetype = "crud-workflow" | "booking-lite" | "inventory-lite";
 export type AppFieldType = "text" | "number" | "date" | "datetime" | "select" | "textarea";
 export type AppFieldValue = string | number;
 
@@ -41,6 +41,13 @@ export interface AppSummaryMetricSpec {
   status?: string;
 }
 
+export interface AppAcceptanceScenarioSpec {
+  id: string;
+  name: string;
+  steps: string[];
+  expectedOutcome: string;
+}
+
 export interface AppSpec {
   schemaVersion: 1;
   sourceGoal: string;
@@ -56,11 +63,12 @@ export interface AppSpec {
   coreActions: string[];
   assumptions: string[];
   risks: string[];
+  unresolvedQuestions: string[];
   deferredFeatures: string[];
+  acceptanceScenarios: AppAcceptanceScenarioSpec[];
   seedRecords: Array<Record<string, AppFieldValue>>;
 }
 
-// M1 intentionally models the existing deterministic single-entity CRUD/status app.
-// Later milestones should add renderer-specific contracts here instead of widening
-// this shape silently: booking-lite, inventory-lite, live extraction, acceptance
-// scenarios, and multi-entity relations belong in M2-M7.
+// AppSpec is the controlled contract for generated local prototypes. Live mode
+// may extract product intent, but app code and package/API shape stay inside
+// deterministic renderer capabilities.

@@ -57,7 +57,8 @@ Current capabilities:
 - Deterministic mock eval runner with local JSON/Markdown reports.
 - Mock and Chat Completions-compatible model provider boundary.
 - Structured agent messages, agent action records, context packages, artifact lineage, decision logs, approval records, and event trace.
-- AppSpec-driven generated runnable Vite React app package with local API and JSON persistence.
+- AppSpec-driven generated runnable Vite React app package with local API, JSON persistence, renderer capability boundaries, explicit deferrals, unresolved questions, and acceptance scenarios.
+- ProductBrief trace for prompt-specific extraction before DomainSpec/AppSpec derivation.
 - Final package validation and `run-summary.json`.
 
 The next work should strengthen this spine rather than broaden the product.
@@ -74,7 +75,7 @@ Build:
 - Keep compiled `Task` state aligned with the existing `AgentStep` registry until the orchestrator fully replaces the static loop.
 - Keep the software-freelance workflow represented by `software-freelance-pack`.
 - Strengthen required artifact validation for final-package completeness.
-- Persist `state/app-spec.json`, `trace/app-spec.json`, and structured `trace/app-validation.json` for the current single-entity `crud-workflow` generated app.
+- Persist `state/app-spec.json`, `trace/app-spec.json`, and structured `trace/app-validation.json` for current single-entity `crud-workflow`, `booking-lite`, and `inventory-lite` generated apps.
 - Keep `run-summary.json` accurate with run status, package path, artifact count, validation result, and failures.
 - Keep `state/` files local and ignored as generated output.
 
@@ -82,7 +83,7 @@ Acceptance:
 
 - One command creates a complete delivery package.
 - Every final package has requirements, scope, architecture, task breakdown, app, QA report, handoff guide, agent messages, agent actions, context packages, events, decisions, approvals, lineage, and run summary.
-- Every generated app has a valid M1 AppSpec trace and generated-app validation trace.
+- Every generated app has a ProductBrief trace, valid AppSpec trace with deferrals, unresolved questions, and acceptance scenarios, plus a generated-app validation trace.
 - Every run has persisted run, task, artifact, message, context package, event, and approval state.
 - Users can inspect a run with `agentsim inspect`, `agentsim tasks`, `agentsim graph`, `agentsim events`, `agentsim artifacts`, `agentsim approvals`, `agentsim contexts`, `agentsim context`, and `agentsim viewer`.
 - Approval-paused runs can continue with `agentsim approve` followed by `agentsim resume`.
@@ -109,12 +110,14 @@ Build:
 
 Current implementation note:
 
-- The safe command runner exists, but automatic generated-app command execution remains disabled by default.
+- The safe command runner exists and generated-app command checks are recorded in `app/test-report.md`.
+- Generated-app install/build checks run automatically only when `--allow-commands --command-policy dev` or a broader trusted local policy is selected.
 - Repair-loop plumbing exists, but automatic fix execution is still intentionally limited.
 
 Acceptance:
 
 - Generated apps can be installed and built from the package README commands.
+- When command execution is enabled with the dev policy, generated apps run a local API smoke check for health, list, create, and status transition behavior.
 - Build failures are captured in QA artifacts and event traces.
 - At least one repair attempt is recorded when a known fixable error occurs.
 

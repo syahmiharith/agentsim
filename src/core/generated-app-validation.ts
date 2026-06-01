@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppSpec } from "../app-spec/app-spec.js";
+import { validateAppSpec } from "../app-spec/app-spec-validation.js";
+import type { GeneratedAppExecutionReport } from "./generated-app-execution.js";
 
 export interface GeneratedAppValidationCheck {
   id: string;
@@ -15,17 +17,26 @@ export interface GeneratedAppValidation {
   checks: GeneratedAppValidationCheck[];
 }
 
-export async function validateGeneratedApp(finalPackageDir: string, appSpec: AppSpec): Promise<GeneratedAppValidation> {
+export async function validateGeneratedApp(
+  finalPackageDir: string,
+  appSpec: AppSpec,
+  executionReport?: GeneratedAppExecutionReport,
+): Promise<GeneratedAppValidation> {
   const checks: GeneratedAppValidationCheck[] = [];
   const files = await readGeneratedFiles(finalPackageDir, appSpec);
 
+  checks.push(appSpecValidationCheck(appSpec));
   checks.push(requiredFilesCheck(files));
+  checks.push(testReportCheck(files));
   checks.push(readmeCommandsCheck(files));
   checks.push(packageScriptsCheck(files));
   checks.push(apiRoutesCheck(files, appSpec));
   checks.push(uiTermsCheck(files, appSpec));
+  checks.push(uiSafetyCheck(files));
   checks.push(workflowStatusesCheck(files, appSpec));
   checks.push(seedDataCheck(files, appSpec));
+  checks.push(acceptanceScenariosCheck(appSpec, executionReport));
+  checks.push(...commandExecutionChecks(executionReport));
 
   const passed = checks.filter((check) => check.status === "passed").length;
   const ok = checks.every((check) => check.status === "passed");
@@ -39,10 +50,43 @@ export async function validateGeneratedApp(finalPackageDir: string, appSpec: App
   };
 }
 
+function acceptanceScenariosCheck(appSpec: AppSpec, executionReport: GeneratedAppExecutionReport | undefined): GeneratedAppValidationCheck {
+  if (!Array.isArray(appSpec.acceptanceScenarios) || appSpec.acceptanceScenarios.length === 0) {
+    return failed("spec.acceptance-scenarios", "AppSpec must include acceptance scenarios.");
+  }
+
+  const missingTerms = ["list", "create", "status"].filter((term) => {
+    const text = appSpec.acceptanceScenarios
+      .map((scenario) => `${scenario.name} ${scenario.steps.join(" ")} ${scenario.expectedOutcome}`)
+      .join(" ")
+      .toLowerCase();
+    return !text.includes(term);
+  });
+  if (missingTerms.length > 0) {
+    return failed("spec.acceptance-scenarios", `AppSpec acceptance scenarios are missing behavior coverage: ${missingTerms.join(", ")}`);
+  }
+
+  const scenarioChecks = executionReport?.acceptanceScenarios ?? [];
+  const failedScenario = scenarioChecks.find((scenario) => scenario.status !== "passed" && executionReport?.commandExecutionEnabled);
+  if (failedScenario) {
+    return failed("spec.acceptance-scenarios", `Acceptance scenario was not executed successfully: ${failedScenario.name}`);
+  }
+
+  return passed("spec.acceptance-scenarios", "AppSpec includes list, create, and status acceptance scenarios.");
+}
+
+function appSpecValidationCheck(appSpec: AppSpec): GeneratedAppValidationCheck {
+  const validation = validateAppSpec(appSpec);
+  return validation.ok
+    ? passed("spec.app-spec", "AppSpec is valid for a supported renderer.")
+    : failed("spec.app-spec", `AppSpec validation failed: ${validation.failures.join("; ")}`);
+}
+
 async function readGeneratedFiles(finalPackageDir: string, appSpec: AppSpec): Promise<Record<string, string | undefined>> {
   const relativePaths = [
     "app/package.json",
     "app/README.md",
+    "app/test-report.md",
     "app/server.js",
     "app/src/App.tsx",
     "app/src/main.tsx",
@@ -57,6 +101,13 @@ async function readGeneratedFiles(finalPackageDir: string, appSpec: AppSpec): Pr
     }
   }
   return files;
+}
+
+function testReportCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
+  const report = files["app/test-report.md"];
+  return report && report.includes("# Generated App Test Report")
+    ? passed("shape.test-report", "Generated app test report is present.")
+    : failed("shape.test-report", "Generated app test report is missing.");
 }
 
 function requiredFilesCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
@@ -114,13 +165,34 @@ function uiTermsCheck(files: Record<string, string | undefined>, appSpec: AppSpe
     appSpec.domain,
     appSpec.primaryEntity.name,
     appSpec.primaryEntity.pluralName,
-    ...appSpec.primaryEntity.fields.map((field) => field.label),
-    ...appSpec.screens.map((screen) => screen.name),
+    appSpec.appArchetype,
+    ...appSpec.primaryEntity.fields.flatMap((field) => [field.name, field.label]),
+    ...appSpec.screens.flatMap((screen) => [screen.name, ...screen.actions]),
   ];
   const missing = unique(requiredTerms).filter((term) => !app.includes(term));
   return missing.length === 0
     ? passed("shape.ui-app-spec-terms", "Generated UI includes AppSpec names, fields, and screens.")
     : failed("shape.ui-app-spec-terms", `Generated UI is missing AppSpec terms: ${missing.join(", ")}`);
+}
+
+function uiSafetyCheck(files: Record<string, string | undefined>): GeneratedAppValidationCheck {
+  const app = files["app/src/App.tsx"] ?? "";
+  const styles = files["app/src/styles.css"] ?? "";
+  const combined = `${app}\n${styles}`;
+  const failures = [
+    [/\bfrom\s+["'](?!react["'])[^"']+["']/g, "imports other than react"],
+    [/\bimport\s*\(/g, "dynamic imports"],
+    [/https?:\/\/(?!127\.0\.0\.1:4178\/api)/g, "external URLs"],
+    [/(sk-[A-Za-z0-9_-]{12,}|AGENTSIM_MODEL|OPENAI_API_KEY|BEGIN PRIVATE KEY)/g, "secret-looking values"],
+    [/(\{\{|\}\}|lorem ipsum|todo:)/gi, "placeholder text"],
+    [/\b(stripe|payment|deploy|production-ready)\b/gi, "unsupported production claims"],
+  ]
+    .filter(([pattern]) => (pattern as RegExp).test(combined))
+    .map(([, label]) => label as string);
+
+  return failures.length === 0
+    ? passed("shape.ui-safety", "Generated UI avoids unsafe imports, external URLs, secrets, placeholders, and unsupported claims.")
+    : failed("shape.ui-safety", `Generated UI contains unsafe content: ${failures.join(", ")}`);
 }
 
 function workflowStatusesCheck(files: Record<string, string | undefined>, appSpec: AppSpec): GeneratedAppValidationCheck {
@@ -147,6 +219,16 @@ function seedDataCheck(files: Record<string, string | undefined>, appSpec: AppSp
   } catch {
     return failed("spec.seed-data", "Generated seed data is not valid JSON.");
   }
+}
+
+function commandExecutionChecks(executionReport: GeneratedAppExecutionReport | undefined): GeneratedAppValidationCheck[] {
+  if (!executionReport) {
+    return [];
+  }
+
+  return executionReport.checks
+    .filter((check) => check.status !== "skipped")
+    .map((check) => (check.status === "passed" ? passed(`command.${check.id}`, check.message) : failed(`command.${check.id}`, check.message)));
 }
 
 function passed(id: string, message: string): GeneratedAppValidationCheck {

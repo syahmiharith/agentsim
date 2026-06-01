@@ -463,6 +463,8 @@ export interface AgentContext {
   workspace: Workspace;
   workspaceDriver: WorkspaceDriver;
   artifactsByType: Partial<Record<ArtifactType, Artifact>>;
+  allowCommands?: boolean;
+  commandPolicy: CommandPolicy;
   contextPackage?: ContextPackage;
   tools?: ToolRuntime;
   currentMessages?: AgentMessageRecord[];

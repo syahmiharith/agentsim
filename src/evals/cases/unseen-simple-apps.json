@@ -1,0 +1,127 @@
+[
+  {
+    "id": "pet-grooming-appointments",
+    "suite": "unseen-simple-apps",
+    "difficulty": "easy",
+    "prompt": "Build a pet grooming appointment system",
+    "expected": {
+      "appName": "Pet Grooming Scheduler",
+      "appArchetype": "booking-lite",
+      "primaryEntity": "Grooming Appointment",
+      "requiredFields": ["petName", "ownerName", "service", "appointmentDateTime"],
+      "requiredStatuses": ["Requested", "Confirmed", "Completed"],
+      "requiredArtifacts": [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/test-report.md",
+        "trace/product-brief.json",
+        "trace/domain-spec.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/run-summary.json"
+      ],
+      "requiredPhrases": [{ "path": "app/src/App.tsx", "terms": ["Pet Grooming Scheduler", "petName", "appointmentDateTime", "Confirmed"] }],
+      "forbiddenPhrases": []
+    }
+  },
+  {
+    "id": "phone-repair-tickets",
+    "suite": "unseen-simple-apps",
+    "difficulty": "easy",
+    "prompt": "Build a repair ticket tracker for a phone shop",
+    "expected": {
+      "appName": "Phone Repair Ticket Desk",
+      "appArchetype": "crud-workflow",
+      "primaryEntity": "Repair Ticket",
+      "requiredFields": ["customerName", "deviceModel", "issue", "priority"],
+      "requiredStatuses": ["Open", "Diagnosing", "Ready"],
+      "requiredArtifacts": [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/test-report.md",
+        "trace/product-brief.json",
+        "trace/domain-spec.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/run-summary.json"
+      ],
+      "requiredPhrases": [{ "path": "app/src/App.tsx", "terms": ["Phone Repair Ticket Desk", "deviceModel", "Diagnosing"] }],
+      "forbiddenPhrases": []
+    }
+  },
+  {
+    "id": "gym-class-reservations",
+    "suite": "unseen-simple-apps",
+    "difficulty": "easy",
+    "prompt": "Build a gym class reservation app",
+    "expected": {
+      "appName": "Gym Class Reservation Desk",
+      "appArchetype": "booking-lite",
+      "primaryEntity": "Class Reservation",
+      "requiredFields": ["memberName", "className", "classDateTime"],
+      "requiredStatuses": ["Requested", "Reserved", "Attended"],
+      "requiredArtifacts": [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/test-report.md",
+        "trace/product-brief.json",
+        "trace/domain-spec.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/run-summary.json"
+      ],
+      "requiredPhrases": [{ "path": "app/src/App.tsx", "terms": ["Gym Class Reservation Desk", "classDateTime", "Reserved"] }],
+      "forbiddenPhrases": []
+    }
+  },
+  {
+    "id": "camera-rental-checkout",
+    "suite": "unseen-simple-apps",
+    "difficulty": "easy",
+    "prompt": "Build a rental item checkout system for a camera store",
+    "expected": {
+      "appName": "Camera Rental Checkout Desk",
+      "appArchetype": "inventory-lite",
+      "primaryEntity": "Rental Checkout",
+      "requiredFields": ["customerName", "itemName", "checkoutDate", "quantity"],
+      "requiredStatuses": ["Requested", "Checked Out", "Returned"],
+      "requiredArtifacts": [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/test-report.md",
+        "trace/product-brief.json",
+        "trace/domain-spec.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/run-summary.json"
+      ],
+      "requiredPhrases": [{ "path": "app/src/App.tsx", "terms": ["Camera Rental Checkout Desk", "checkoutDate", "Checked Out"] }],
+      "forbiddenPhrases": []
+    }
+  },
+  {
+    "id": "volunteer-shift-signup",
+    "suite": "unseen-simple-apps",
+    "difficulty": "easy",
+    "prompt": "Build a volunteer shift signup system",
+    "expected": {
+      "appName": "Volunteer Shift Signup Desk",
+      "appArchetype": "booking-lite",
+      "primaryEntity": "Shift Signup",
+      "requiredFields": ["volunteerName", "shiftName", "shiftDateTime"],
+      "requiredStatuses": ["Requested", "Confirmed", "Completed"],
+      "requiredArtifacts": [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/test-report.md",
+        "trace/product-brief.json",
+        "trace/domain-spec.json",
+        "trace/app-spec.json",
+        "trace/app-validation.json",
+        "trace/run-summary.json"
+      ],
+      "requiredPhrases": [{ "path": "app/src/App.tsx", "terms": ["Volunteer Shift Signup Desk", "shiftDateTime", "Confirmed"] }],
+      "forbiddenPhrases": []
+    }
+  }
+]

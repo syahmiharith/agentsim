@@ -1,6 +1,9 @@
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { renderModelPrompt } from "../core/context.js";
+import { renderGeneratedAppTestReport, runGeneratedAppExecutionChecks } from "../core/generated-app-execution.js";
 import { validateGeneratedApp } from "../core/generated-app-validation.js";
+import { safeJoin } from "../core/paths.js";
 import { getAgent } from "./agents.js";
 import {
   apiPlan,
@@ -173,7 +176,18 @@ export const agentSteps: AgentStep[] = [
         await context.tools.writeFile({ path, content });
       }
       await context.workspaceDriver.copyDirectory(join(context.workspace.workspaceDir, "app"), join(context.workspace.finalPackageDir, "app"));
-      const validation = await validateGeneratedApp(context.workspace.finalPackageDir, context.appSpec);
+      const executionReport = await runGeneratedAppExecutionChecks({
+        workspace: context.workspace,
+        workspaceDriver: context.workspaceDriver,
+        commandPolicy: context.commandPolicy,
+        allowCommands: context.allowCommands ?? false,
+        appSpec: context.appSpec,
+        abortSignal: context.abortSignal,
+      });
+      const testReport = renderGeneratedAppTestReport(executionReport);
+      await context.tools.writeFile({ path: "app/test-report.md", content: testReport });
+      await writeFile(safeJoin(context.workspace.finalPackageDir, "app/test-report.md"), testReport, "utf8");
+      const validation = await validateGeneratedApp(context.workspace.finalPackageDir, context.appSpec, executionReport);
       context.appValidation = validation;
       return {
         content: "Generated runnable app prototype. See final-package/app/README.md.",

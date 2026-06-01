@@ -38,21 +38,21 @@ describe("inferDomainSpec", () => {
   });
 
   it.each([
-    ["Build an inventory request system for a flower company", "inventory-request", "Inventory Request Desk", "Inventory Request"],
-    ["Build a booking system for a barber shop", "barber-booking", "Barber Booking Desk", "Booking"],
-    ["Build a clinic appointment system", "clinic-appointment", "Clinic Appointment Desk", "Appointment"],
-    ["Build a restaurant reservation system", "restaurant-reservation", "Restaurant Reservation Desk", "Reservation"],
-    ["Build an equipment checkout system for a university club", "equipment-checkout", "Club Equipment Checkout", "Checkout"],
-    ["Build a CRM for a small business", "small-crm", "Small CRM Desk", "Lead"],
-    ["Build a student portal", "student-portal", "Student Portal Desk", "Student Request"],
-    ["Build a landing page workflow for a local business", "landing-page-content", "Local Business Landing Desk", "Content Request"]
-  ])("returns inference metadata for %s", (goal, presetId, appName, entityName) => {
+    ["Build an inventory request system for a flower company", "inventory-request", "Inventory Request Desk", "Inventory Request", "inventory-lite"],
+    ["Build a booking system for a barber shop", "barber-booking", "Barber Booking Desk", "Booking", "booking-lite"],
+    ["Build a clinic appointment system", "clinic-appointment", "Clinic Appointment Desk", "Appointment", "booking-lite"],
+    ["Build a restaurant reservation system", "restaurant-reservation", "Restaurant Reservation Desk", "Reservation", "booking-lite"],
+    ["Build an equipment checkout system for a university club", "equipment-checkout", "Club Equipment Checkout", "Checkout", "inventory-lite"],
+    ["Build a CRM for a small business", "small-crm", "Small CRM Desk", "Lead", "crud-workflow"],
+    ["Build a student portal", "student-portal", "Student Portal Desk", "Student Request", "crud-workflow"],
+    ["Build a landing page workflow for a local business", "landing-page-content", "Local Business Landing Desk", "Content Request", "crud-workflow"],
+  ])("returns inference metadata for %s", (goal, presetId, appName, entityName, appArchetype) => {
     const result = inferDomainSpecResult(goal);
 
     expect(result.matchedPresetId).toBe(presetId);
     expect(result.spec.appName).toBe(appName);
     expect(result.spec.primaryEntity.name).toBe(entityName);
-    expect(result.spec.appArchetype).toBe("simple-workflow");
+    expect(result.spec.appArchetype).toBe(appArchetype);
     expect(result.fallbackUsed).toBe(false);
     expect(result.confidence).toBeGreaterThan(0.35);
     expect(validateDomainSpec(result.spec).ok).toBe(true);
@@ -98,10 +98,10 @@ describe("domain preset registry", () => {
     expect(new Set(domainPresets.map((preset) => preset.appSlug)).size).toBe(domainPresets.length);
   });
 
-  it("keeps every preset valid and simple-workflow shaped", () => {
+  it("keeps every preset valid and supported-archetype shaped", () => {
     for (const preset of domainPresets) {
       const spec = domainSpecFromPreset(preset, "Build a test app");
-      expect(spec.appArchetype).toBe("simple-workflow");
+      expect(["crud-workflow", "booking-lite", "inventory-lite"]).toContain(spec.appArchetype);
       expect(spec.primaryEntity.fields.length).toBeGreaterThan(0);
       expect(spec.workflowStatuses.length).toBeGreaterThan(0);
       expect(spec.seedRecords.length).toBeGreaterThan(0);

@@ -22,7 +22,7 @@ CLI
 -> dashboard inspection
 ```
 
-The current workflow starts from a client-style goal, infers a software-freelance domain spec, derives a single-entity `crud-workflow` AppSpec, generates durable artifacts, writes a runnable app prototype from that AppSpec, records decisions and approvals, validates the final package, and writes trace files.
+The current workflow starts from a client-style goal, derives a prompt-specific product brief, infers a software-freelance domain spec, derives a single-entity AppSpec, generates durable artifacts, writes a runnable app prototype from that AppSpec, records decisions and approvals, validates the final package, and writes trace files.
 
 ## Main Modules
 
@@ -137,13 +137,14 @@ Main responsibilities:
 - rehydrate existing run state for `resume`
 - mark dependency-ready tasks before execution
 - infer a `DomainSpec` through the domain pack and persist it for resume
-- derive and persist an M1 AppSpec as the runnable generated-app contract
+- derive and persist a ProductBrief and AppSpec as the runnable generated-app contract
 - record provider and domain decisions
 - execute tasks through the scheduler in deterministic compiled-step order
 - assemble and validate a context package before each agent action
 - generate planning, technical, review, client, app, and trace artifacts
 - copy the generated app into the final package
 - write `trace/app-spec.json` and structured `trace/app-validation.json`
+- record generated-app command checks in `app/test-report.md` and `trace/command-results.jsonl` when local command execution is enabled
 - validate package completeness and convert validation into a review verdict
 - update run and task state
 - write `trace/run-summary.json`
@@ -153,9 +154,9 @@ The default orchestration path remains single-task execution so the final packag
 
 ## Runnable App Contract
 
-M1 uses `AppSpec` as the contract between domain inference and deterministic app rendering. `DomainSpec` remains the planning and domain-inference contract; `AppSpec` is persisted to `state/app-spec.json`, exported as `trace/app-spec.json`, and consumed by the generated app renderer.
+`ProductBrief` captures prompt-specific intent before the compatibility `DomainSpec` layer. `AppSpec` is the contract between domain inference and deterministic app rendering. `DomainSpec` remains the planning and markdown contract; `ProductBrief` and `AppSpec` are persisted to state and exported to trace.
 
-The current AppSpec surface supports one primary entity, field metadata, screens, a status workflow, summary metrics, assumptions, risks, deferred features, and seed records. The only supported archetype is `crud-workflow`. Booking calendars, inventory balance math, live schema-constrained extraction, acceptance scenario execution, and multi-entity relations are later milestones and should not be implied by M1-generated apps.
+The current AppSpec surface supports one primary entity, field metadata, screens, a status workflow, summary metrics, assumptions, risks, unresolved questions, deferred features, acceptance scenarios, and seed records. Supported archetypes are `crud-workflow`, `booking-lite`, and `inventory-lite`, with renderer capability manifests declaring supported screen kinds, field types, runtime checks, and unsupported features. When command execution is enabled with the dev policy, generated app validation runs syntax, install, build, and local API smoke checks for health, list, create, and status transition behavior. External calendar sync, full inventory accounting, rich business-rule execution, and multi-entity relations are later milestones and should be recorded as deferred or unresolved instead of implied by generated apps.
 
 `resume` reuses `outputs/{runId}`. It refuses completed, failed, or cancelled runs, refuses runs with pending approvals, reloads the persisted domain spec, rebuilds `artifactsByType` from persisted artifacts, and continues the scheduler from existing task statuses. If no model flag is supplied, the CLI uses the persisted run model mode.
 
@@ -259,7 +260,7 @@ It supports:
 
 All relative workspace and artifact paths go through `safeJoin()`. Absolute paths are rejected when a relative path is expected, `..` escape attempts are rejected, and resolved targets must stay inside the workspace or final-package root.
 
-`WorkspaceDriver.runCommand` exists as an optional interface contract for the local execution milestone. Do not add Docker, remote VM, or cloud execution until local filesystem execution proves the need.
+`WorkspaceDriver.runCommand` exists as an optional interface contract for the local execution milestone. The generated-app builder writes `app/test-report.md` on every run and executes install/build checks only when command execution is explicitly enabled and allowed by policy. Do not add Docker, remote VM, or cloud execution until local filesystem execution proves the need.
 
 ## Tools And Approvals
 
@@ -269,7 +270,7 @@ The risk-aware tool runtime defines `read_file`, `write_file`, `list_files`, `cr
 - Tools are passed into `AgentContext`, so real agent steps can use them.
 - `create_artifact` uses the active artifact store and repository, not a disconnected store.
 - `run_command` is dangerous, approval-required, allowlisted, timed, output-capped, and uses a sanitized environment.
-- Command execution remains disabled unless explicitly allowed.
+- Command execution remains disabled unless explicitly allowed. Generated-app checks use the same local command runner and policy boundary when opt-in command execution is enabled.
 - Command policy is separate from approval. `strict` allows only narrow version/syntax checks, `dev` allows bounded local package commands such as `pnpm build`, and `unsafe-local` preserves the broader local allowlist for trusted workspaces.
 - When a context policy is active, tools must also be listed in
   `allowedTools`; denied calls emit `tool.blocked_by_policy`.

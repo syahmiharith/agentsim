@@ -44,7 +44,7 @@ Current limitations:
 - the workflow is tuned for the first software-freelance demo, not arbitrary domains
 - approvals, workspace execution, command execution, repair loops, and provider routing are still early
 - the workflow graph is local-first; it is not a distributed scheduler
-- command execution is disabled by default and requires both approval and explicit opt-in
+- generated-app install/build command checks are disabled by default and require explicit opt-in
 - no hosted service, dashboard, or production deployment automation exists yet
 
 ## Problem
@@ -122,8 +122,10 @@ For the flower-company inventory example, a useful run should produce artifacts 
 - `trace/events.jsonl` showing the workflow events that led to the final package
 - `trace/agent-messages.json` showing structured task assignments, handoffs, and review requests between agents
 - `trace/agent-actions.json` showing each role-owned action, input artifacts, output artifact, model/source, and status
-- `trace/app-spec.json` recording the deterministic runnable app contract used by the renderer
-- `trace/app-validation.json` recording structured generated-app validation checks
+- `trace/product-brief.json` recording the prompt-specific product brief used before DomainSpec/AppSpec derivation
+- `trace/app-spec.json` recording the deterministic runnable app contract, renderer archetype, deferred features, unresolved questions, and acceptance scenarios used by the renderer
+- `trace/app-validation.json` recording structured generated-app validation checks, including command checks when enabled
+- `app/test-report.md` summarizing generated-app syntax, install, build, and local API smoke checks, or skipped execution when commands are not enabled
 
 ## Design Principles
 
@@ -151,9 +153,10 @@ Agentsim currently has a CLI-based proof of concept:
 - artifact-producing agent steps for intake, planning, architecture, implementation, QA, and delivery
 - durable artifact generation
 - artifact lineage, decision logs, approval records, and event traces
-- AppSpec-driven runnable generated app package for prompt-specific single-entity `crud-workflow` prototypes
+- AppSpec-driven runnable generated app package for prompt-specific single-entity `crud-workflow`, `booking-lite`, and `inventory-lite` prototypes
+- optional generated-app execution evidence for syntax, install, build, health, list, create, and status-transition checks under the local dev command policy
 
-The current generated app contract is intentionally narrow: M1 supports one primary entity, local JSON persistence, a CRUD form/list, and status workflow updates. Broader archetypes such as booking calendars, inventory balance math, live schema extraction, and multi-entity relations are sequenced for later milestones.
+The current generated app contract is intentionally narrow: live mode may use a model to extract a schema-constrained product brief, but app code is still rendered by controlled local renderers with explicit capability manifests. Broader behavior such as external calendar sync, production inventory math, auth, deployment, payments, and multi-entity relations is captured as deferred unless a renderer explicitly supports it.
 
 ## Quickstart
 
@@ -247,7 +250,7 @@ Optional local context can be imported without copying private source into the f
 pnpm agentsim run "Build a client portal for this project" --mock --repo .
 ```
 
-Command execution remains disabled by default. When enabled, `run_command` still requires tool approval, a context policy that allows `run_command`, and a command policy:
+Command execution remains disabled by default for agent tools. Generated-app install/build checks are run automatically only when commands are explicitly enabled and allowed by the selected command policy. Model/tool-initiated `run_command` calls still require tool approval, a context policy that allows `run_command`, and a command policy:
 
 ```bash
 pnpm agentsim run "Build an inventory request system" --mock --allow-commands --command-policy dev

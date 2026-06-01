@@ -1,3 +1,5 @@
+import type { AppArchetype } from "../app-spec/app-spec.js";
+
 export type FieldType = "text" | "number" | "date" | "datetime" | "select" | "textarea";
 
 export interface FieldSpec {
@@ -25,7 +27,7 @@ export interface DomainSpec {
   sourceGoal: string;
   appName: string;
   appSlug: string;
-  appArchetype?: "simple-workflow";
+  appArchetype?: AppArchetype;
   domain: string;
   primaryEntity: EntitySpec;
   supportingEntities: EntitySpec[];
@@ -37,5 +39,7 @@ export interface DomainSpec {
   generatedArtifactTypes: string[];
   assumptions: string[];
   risks: string[];
+  unresolvedQuestions?: string[];
+  deferredFeatures?: string[];
   seedRecords: Array<Record<string, string | number>>;
 }

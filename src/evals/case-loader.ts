@@ -6,7 +6,7 @@ import type { EvalCase, EvalSuite } from "./types.js";
 const here = dirname(fileURLToPath(import.meta.url));
 
 export async function loadEvalCases(suite: EvalSuite | "all" = "smoke"): Promise<EvalCase[]> {
-  const suites: EvalSuite[] = suite === "all" ? ["smoke", "domain"] : [suite];
+  const suites: EvalSuite[] = suite === "all" ? ["smoke", "domain", "unseen-simple-apps"] : [suite];
   const cases = (await Promise.all(suites.map(loadSuiteCases))).flat();
   const seen = new Set<string>();
   for (const evalCase of cases) {
@@ -42,14 +42,22 @@ function normalizeCase(value: unknown, suite: EvalSuite, index: number): EvalCas
     prompt: readString(value, "prompt", suite, index),
     expected: {
       appName: readString(expected, "appName", suite, index),
+      appArchetype:
+        expected.appArchetype === undefined
+          ? undefined
+          : (readChoice(
+              readString(expected, "appArchetype", suite, index),
+              ["crud-workflow", "booking-lite", "inventory-lite"],
+              `${suite}[${index}].expected.appArchetype`,
+            ) as EvalCase["expected"]["appArchetype"]),
       primaryEntity: readString(expected, "primaryEntity", suite, index),
       requiredFields: readStringArray(expected, "requiredFields", suite, index),
       requiredStatuses: readStringArray(expected, "requiredStatuses", suite, index),
       requiredArtifacts: readStringArray(expected, "requiredArtifacts", suite, index),
       requiredPhrases: readPhraseExpectations(expected.requiredPhrases, suite, index, "requiredPhrases"),
       forbiddenPhrases: readPhraseExpectations(expected.forbiddenPhrases, suite, index, "forbiddenPhrases"),
-      commands: expected.commands === undefined ? undefined : readCommands(expected.commands, suite, index)
-    }
+      commands: expected.commands === undefined ? undefined : readCommands(expected.commands, suite, index),
+    },
   };
   if (evalCase.suite !== suite) {
     throw new Error(`Eval case ${evalCase.id} is in ${suite}.json but declares suite ${evalCase.suite}.`);
@@ -67,7 +75,7 @@ function readPhraseExpectations(value: unknown, suite: string, index: number, ke
     }
     return {
       path: readString(item, "path", suite, index),
-      terms: readStringArray(item, "terms", suite, index)
+      terms: readStringArray(item, "terms", suite, index),
     };
   });
 }
@@ -84,7 +92,7 @@ function readCommands(value: unknown, suite: string, index: number): NonNullable
       command: readString(item, "command", suite, index),
       cwd: readString(item, "cwd", suite, index),
       timeoutMs: readNumber(item, "timeoutMs", suite, index),
-      optional: item.optional === undefined ? undefined : Boolean(item.optional)
+      optional: item.optional === undefined ? undefined : Boolean(item.optional),
     };
   });
 }
@@ -101,6 +109,13 @@ function readNumber(record: Record<string, unknown>, key: string, suite: string,
   const value = record[key];
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`Eval case ${suite}[${index}].${key} must be a finite number.`);
+  }
+  return value;
+}
+
+function readChoice(value: string, choices: string[], path: string): string {
+  if (!choices.includes(value)) {
+    throw new Error(`Eval case ${path} must be one of: ${choices.join(", ")}.`);
   }
   return value;
 }

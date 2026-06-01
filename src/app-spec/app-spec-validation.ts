@@ -1,7 +1,9 @@
 import type { ValidationResult } from "../types.js";
-import type { AppFieldSpec, AppSpec } from "./app-spec.js";
+import type { AppArchetype, AppFieldSpec, AppSpec } from "./app-spec.js";
+import { rendererCapabilityFor } from "./renderer-capabilities.js";
 
 const fieldTypes = new Set<AppFieldSpec["type"]>(["text", "number", "date", "datetime", "select", "textarea"]);
+const appArchetypes = new Set<AppArchetype>(["crud-workflow", "booking-lite", "inventory-lite"]);
 const safeSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const safeIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const fieldNamePattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -12,8 +14,8 @@ export function validateAppSpec(spec: AppSpec): ValidationResult {
   if (spec.schemaVersion !== 1) {
     failures.push("schemaVersion must be 1");
   }
-  if (spec.appArchetype !== "crud-workflow") {
-    failures.push("appArchetype must be crud-workflow");
+  if (!appArchetypes.has(spec.appArchetype)) {
+    failures.push(`appArchetype must be one of: ${[...appArchetypes].join(", ")}`);
   }
   requireNonEmpty(spec.sourceGoal, "sourceGoal", failures);
   requireNonEmpty(spec.appName, "appName", failures);
@@ -24,17 +26,67 @@ export function validateAppSpec(spec: AppSpec): ValidationResult {
   validateScreens(spec, failures);
   validateWorkflow(spec, failures);
   validateSummaryMetrics(spec, failures);
+  validateRendererCapabilities(spec, failures);
+  validateAcceptanceScenarios(spec, failures);
   validateSeedRecords(spec, failures);
   validateStringArray(spec.targetUsers, "targetUsers", failures);
   validateStringArray(spec.coreActions, "coreActions", failures);
   validateStringArray(spec.assumptions, "assumptions", failures);
   validateStringArray(spec.risks, "risks", failures);
+  validateStringArray(spec.unresolvedQuestions, "unresolvedQuestions", failures, { allowEmpty: true });
   validateStringArray(spec.deferredFeatures, "deferredFeatures", failures, { allowEmpty: true });
 
   return {
     ok: failures.length === 0,
     failures,
   };
+}
+
+function validateRendererCapabilities(spec: AppSpec, failures: string[]): void {
+  if (!appArchetypes.has(spec.appArchetype)) {
+    return;
+  }
+  const capabilities = rendererCapabilityFor(spec.appArchetype);
+  for (const screen of spec.screens ?? []) {
+    if (screen?.kind && !capabilities.supportedScreenKinds.includes(screen.kind)) {
+      failures.push(`${spec.appArchetype} renderer does not support screen kind: ${screen.kind}`);
+    }
+  }
+  for (const field of spec.primaryEntity?.fields ?? []) {
+    if (field?.type && !capabilities.supportedFieldTypes.includes(field.type)) {
+      failures.push(`${spec.appArchetype} renderer does not support field type: ${field.type}`);
+    }
+  }
+}
+
+function validateAcceptanceScenarios(spec: AppSpec, failures: string[]): void {
+  if (!Array.isArray(spec.acceptanceScenarios) || spec.acceptanceScenarios.length === 0) {
+    failures.push("acceptanceScenarios must not be empty");
+    return;
+  }
+
+  const ids = new Set<string>();
+  const combinedScenarioText = spec.acceptanceScenarios
+    .map((scenario) => `${scenario.name} ${scenario.steps?.join(" ") ?? ""} ${scenario.expectedOutcome}`)
+    .join(" ")
+    .toLowerCase();
+
+  for (const [index, scenario] of spec.acceptanceScenarios.entries()) {
+    if (ids.has(scenario.id)) {
+      failures.push(`acceptanceScenarios contains duplicate id: ${scenario.id}`);
+    }
+    ids.add(scenario.id);
+    requireSafeId(scenario.id, `acceptanceScenarios.${index}.id`, failures);
+    requireNonEmpty(scenario.name, `acceptanceScenarios.${index}.name`, failures);
+    validateStringArray(scenario.steps, `acceptanceScenarios.${index}.steps`, failures);
+    requireNonEmpty(scenario.expectedOutcome, `acceptanceScenarios.${index}.expectedOutcome`, failures);
+  }
+
+  for (const expected of ["list", "create", "status"]) {
+    if (!combinedScenarioText.includes(expected)) {
+      failures.push(`acceptanceScenarios must cover ${expected} behavior`);
+    }
+  }
 }
 
 function validatePrimaryEntity(spec: AppSpec, failures: string[]): void {

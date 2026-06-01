@@ -5,23 +5,23 @@ const strictPolicy: CommandPolicy = {
   allowedCommands: ["node", "pnpm"],
   allowedArgPatterns: {
     node: ["^--version$", "^--check\\s+[^\\s]+$"],
-    pnpm: ["^--version$"]
+    pnpm: ["^--version$"],
   },
   maxTimeoutMs: 30_000,
   maxOutputBytes: 64_000,
-  allowNetwork: false
+  allowNetwork: false,
 };
 
 const devPolicy: CommandPolicy = {
   level: "dev",
   allowedCommands: ["node", "pnpm"],
   allowedArgPatterns: {
-    node: ["^--version$", "^--check\\s+[^\\s]+$", "^-e\\s+.+$"],
-    pnpm: ["^--version$", "^install$", "^build$", "^test$", "^typecheck$"]
+    node: ["^--version$", "^--check\\s+[^\\s]+$", "^-e\\s+[\\s\\S]+$"],
+    pnpm: ["^--version$", "^install$", "^build$", "^test$", "^typecheck$"],
   },
   maxTimeoutMs: 120_000,
   maxOutputBytes: 128_000,
-  allowNetwork: false
+  allowNetwork: false,
 };
 
 const unsafeLocalPolicy: CommandPolicy = {
@@ -30,11 +30,11 @@ const unsafeLocalPolicy: CommandPolicy = {
   allowedArgPatterns: {
     node: [".*"],
     npm: [".*"],
-    pnpm: [".*"]
+    pnpm: [".*"],
   },
   maxTimeoutMs: 300_000,
   maxOutputBytes: 256_000,
-  allowNetwork: true
+  allowNetwork: true,
 };
 
 export function resolveCommandPolicy(level: CommandPolicyLevel = "strict"): CommandPolicy {
@@ -73,6 +73,6 @@ function clonePolicy(policy: CommandPolicy): CommandPolicy {
   return {
     ...policy,
     allowedCommands: [...policy.allowedCommands],
-    allowedArgPatterns: Object.fromEntries(Object.entries(policy.allowedArgPatterns).map(([command, patterns]) => [command, [...patterns]]))
+    allowedArgPatterns: Object.fromEntries(Object.entries(policy.allowedArgPatterns).map(([command, patterns]) => [command, [...patterns]])),
   };
 }

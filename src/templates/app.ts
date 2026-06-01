@@ -28,12 +28,12 @@ export function renderGeneratedAppFiles(workspace: Pick<Workspace, "runId">, spe
 }
 
 function isAppSpec(spec: AppSpec | DomainSpec): spec is AppSpec {
-  return "schemaVersion" in spec && spec.schemaVersion === 1 && spec.appArchetype === "crud-workflow";
+  return "schemaVersion" in spec && spec.schemaVersion === 1;
 }
 
 function assertSupportedAppSpec(spec: AppSpec): void {
   const appArchetype = spec.appArchetype as string | undefined;
-  if (appArchetype !== "crud-workflow") {
+  if (!["crud-workflow", "booking-lite", "inventory-lite"].includes(appArchetype ?? "")) {
     throw new Error(`Unsupported app archetype: ${appArchetype}`);
   }
 }
@@ -143,6 +143,7 @@ createRoot(document.getElementById("root")!).render(
 function appTsx(spec: AppSpec): string {
   const config = {
     appName: spec.appName,
+    appArchetype: spec.appArchetype,
     domain: spec.domain,
     primaryEntityName: spec.primaryEntity.name,
     primaryEntityPluralName: spec.primaryEntity.pluralName,
@@ -172,6 +173,7 @@ interface FieldConfig {
 
 interface AppConfig {
   appName: string;
+  appArchetype: string;
   domain: string;
   primaryEntityName: string;
   primaryEntityPluralName: string;
@@ -267,7 +269,7 @@ export default function App() {
           <p className="overline">{appConfig.domain}</p>
           <h1>{appConfig.appName}</h1>
           <p className="summary">
-            Create, review, and update {appConfig.primaryEntityPluralName.toLowerCase()} through a focused local workflow for {appConfig.targetUsers.join(", ")}.
+            {archetypeSummary(appConfig.appArchetype, appConfig.primaryEntityPluralName, appConfig.targetUsers)}
           </p>
         </div>
         <div className="metric">
@@ -334,6 +336,16 @@ export default function App() {
       </section>
     </main>
   );
+}
+
+function archetypeSummary(archetype: string, pluralName: string, targetUsers: string[]): string {
+  if (archetype === "booking-lite") {
+    return \`Schedule, review, and move \${pluralName.toLowerCase()} through a local booking workflow for \${targetUsers.join(", ")}.\`;
+  }
+  if (archetype === "inventory-lite") {
+    return \`Track, review, and update \${pluralName.toLowerCase()} through a local inventory workflow for \${targetUsers.join(", ")}.\`;
+  }
+  return \`Create, review, and update \${pluralName.toLowerCase()} through a focused local workflow for \${targetUsers.join(", ")}.\`;
 }
 
 function FieldInput(props: { field: FieldConfig; value: FormValue; onChange: (value: FormValue) => void }) {

@@ -37,6 +37,7 @@ describe("demo workflow", () => {
       "app/src/App.tsx",
       "app/server.js",
       "app/README.md",
+      "app/test-report.md",
       "review/qa-report.md",
       "review/code-review.md",
       "review/known-issues.md",
@@ -47,6 +48,7 @@ describe("demo workflow", () => {
       "trace/context-eval.json",
       "trace/approvals.json",
       "trace/decisions.json",
+      "trace/product-brief.json",
       "trace/domain-spec.json",
       "trace/app-spec.json",
       "trace/app-validation.json",
@@ -102,17 +104,22 @@ describe("demo workflow", () => {
     const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
     expect(appReadme).toContain("pnpm dev:api");
     expect(appReadme).toContain("pnpm dev:web");
+    const appTestReport = await readFile(join(result.finalPackageDir, "app", "test-report.md"), "utf8");
+    expect(appTestReport).toContain("Command execution: disabled");
 
     const domainSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "domain-spec.json"), "utf8"));
+    const productBrief = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "product-brief.json"), "utf8"));
     const appSpec = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "app-spec.json"), "utf8"));
     const appValidation = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "app-validation.json"), "utf8"));
     expect(domainSpec.appName).toBe("Inventory Request Desk");
+    expect(productBrief.appName).toBe("Inventory Request Desk");
     expect(appSpec.appName).toBe("Inventory Request Desk");
-    expect(appSpec.appArchetype).toBe("crud-workflow");
+    expect(appSpec.appArchetype).toBe("inventory-lite");
     expect(appSpec.primaryEntity.name).toBe("Inventory Request");
     expect(appSpec.workflow.statuses).toEqual(domainSpec.workflowStatuses);
     expect(appValidation.ok).toBe(true);
     expect(appValidation.checks.some((check: { id: string }) => check.id === "shape.ui-app-spec-terms")).toBe(true);
+    expect(appValidation.checks.some((check: { id: string }) => check.id === "shape.test-report")).toBe(true);
 
     const runSummary = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "run-summary.json"), "utf8"));
     expect(runSummary.status).toBe("COMPLETED");
@@ -224,6 +231,7 @@ describe("demo workflow", () => {
     expect(result.taskRun.status).toBe("COMPLETED");
     expect(provider.requests.map((request) => request.purpose)).toEqual(
       expect.arrayContaining([
+        "product-brief-extraction",
         "run-brief",
         "agent-step:client-proposal",
         "agent-step:planning-requirements",
@@ -231,7 +239,7 @@ describe("demo workflow", () => {
         "agent-step:delivery-user-guide",
       ]),
     );
-    expect(provider.requests).toHaveLength(17);
+    expect(provider.requests).toHaveLength(18);
     expect(provider.requests.find((request) => request.purpose === "agent-step:planning-requirements")?.prompt).toContain(
       "Structured messages for this agent action",
     );
@@ -241,6 +249,8 @@ describe("demo workflow", () => {
 
     const appReadme = await readFile(join(result.finalPackageDir, "app", "README.md"), "utf8");
     expect(appReadme).toContain("pnpm dev:api");
+    const productBrief = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "product-brief.json"), "utf8"));
+    expect(productBrief.appArchetype).toBe("inventory-lite");
 
     const agentActions = JSON.parse(await readFile(join(result.finalPackageDir, "trace", "agent-actions.json"), "utf8"));
     const modelActions = agentActions.actions.filter((action: { outputSource?: string }) => action.outputSource === "model");
@@ -304,6 +314,42 @@ class RecordingLiveProvider implements ModelProvider {
 
   async generate(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(request);
+    if (request.purpose === "product-brief-extraction") {
+      return {
+        content: JSON.stringify({
+          schemaVersion: 1,
+          appName: "Inventory Request Desk",
+          appArchetype: "inventory-lite",
+          domain: "flower inventory requests",
+          targetUsers: ["shop staff", "inventory manager"],
+          primaryJobs: ["Create inventory request", "Review requests", "Update request status"],
+          entities: [
+            {
+              name: "Inventory Request",
+              pluralName: "Inventory Requests",
+              slug: "requests",
+              fields: [
+                { name: "itemName", label: "Item name", type: "text", required: true },
+                { name: "quantity", label: "Quantity", type: "number", required: true },
+                { name: "neededBy", label: "Needed by", type: "date", required: true },
+                { name: "notes", label: "Notes", type: "textarea", required: false },
+              ],
+            },
+          ],
+          workflows: [{ name: "Request workflow", statuses: ["Pending", "Approved", "Fulfilled"], initialStatus: "Pending", terminalStatuses: ["Fulfilled"] }],
+          screens: [
+            { name: "New Request", purpose: "Create inventory requests.", actions: ["Create request"] },
+            { name: "Request Queue", purpose: "Review and update inventory requests.", actions: ["Update status"] },
+          ],
+          constraints: [],
+          assumptions: ["Local persistence is enough for review."],
+          risks: ["Production use needs authentication."],
+          deferredFeatures: ["supplier integrations"],
+          seedRecords: [{ itemName: "White roses", quantity: 12, neededBy: "2026-06-05", notes: "Wedding order", status: "Pending" }],
+        }),
+        model: "recording-model",
+      };
+    }
     return {
       content: `# Live artifact for ${request.purpose}\n\nGenerated from ${request.prompt.length} prompt characters.`,
       model: "recording-model",

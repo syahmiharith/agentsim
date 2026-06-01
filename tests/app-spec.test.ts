@@ -5,12 +5,12 @@ import { validateAppSpec } from "../src/app-spec/app-spec-validation.js";
 import { inferDomainSpec } from "../src/domain/mock-domain-spec.js";
 
 describe("AppSpec M1", () => {
-  it("derives a valid single-entity crud-workflow AppSpec from existing presets", () => {
+  it("derives a valid single-entity AppSpec from existing presets", () => {
     const domainSpec = inferDomainSpec("Build an inventory request system for a flower company");
     const appSpec = appSpecFromDomainSpec(domainSpec);
 
     expect(validateAppSpec(appSpec)).toEqual({ ok: true, failures: [] });
-    expect(appSpec.appArchetype).toBe("crud-workflow");
+    expect(appSpec.appArchetype).toBe("inventory-lite");
     expect(appSpec.appName).toBe(domainSpec.appName);
     expect(appSpec.primaryEntity.name).toBe(domainSpec.primaryEntity.name);
     expect(appSpec.primaryEntity.fields).toEqual(domainSpec.primaryEntity.fields);
@@ -69,6 +69,47 @@ describe("AppSpec M1", () => {
     appSpec.workflow.initialStatus = "Missing";
 
     expect(validateAppSpec(appSpec).failures).toContain("workflow.initialStatus must be one of workflow.statuses");
+  });
+
+  it("requires list, create, and status acceptance scenarios", () => {
+    const appSpec = validAppSpec();
+    appSpec.acceptanceScenarios = [
+      {
+        id: "list-only",
+        name: "List records",
+        steps: ["Open list"],
+        expectedOutcome: "Records are listed",
+      },
+    ];
+
+    const failures = validateAppSpec(appSpec).failures;
+    expect(failures).toContain("acceptanceScenarios must cover create behavior");
+    expect(failures).toContain("acceptanceScenarios must cover status behavior");
+  });
+
+  it("carries unresolved questions and deferred features from DomainSpec", () => {
+    const domainSpec = inferDomainSpec("Build an inventory request system for a flower company");
+    domainSpec.unresolvedQuestions = ["Who approves urgent requests?"];
+    domainSpec.deferredFeatures = ["Supplier sync"];
+
+    const appSpec = appSpecFromDomainSpec(domainSpec);
+
+    expect(appSpec.unresolvedQuestions).toEqual(["Who approves urgent requests?"]);
+    expect(appSpec.deferredFeatures).toEqual(["Supplier sync"]);
+  });
+
+  it.each(["crud-workflow", "booking-lite", "inventory-lite"] as const)("accepts %s AppSpec archetype", (appArchetype) => {
+    const appSpec = validAppSpec();
+    appSpec.appArchetype = appArchetype;
+
+    expect(validateAppSpec(appSpec)).toEqual({ ok: true, failures: [] });
+  });
+
+  it("rejects unsupported app archetypes", () => {
+    const appSpec = validAppSpec();
+    appSpec.appArchetype = "custom" as typeof appSpec.appArchetype;
+
+    expect(validateAppSpec(appSpec).failures).toContain("appArchetype must be one of: crud-workflow, booking-lite, inventory-lite");
   });
 });
 

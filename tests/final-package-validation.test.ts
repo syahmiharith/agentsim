@@ -91,7 +91,7 @@ describe("validateFinalPackage", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failures).toContain("AppSpec trace appArchetype must be crud-workflow");
+    expect(result.failures).toContain("AppSpec trace appArchetype must be one of: crud-workflow, booking-lite, inventory-lite");
   });
 
   it("rejects missing app-validation trace", async () => {

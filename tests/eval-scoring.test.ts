@@ -6,6 +6,7 @@ import { appSpecFromDomainSpec } from "../src/app-spec/app-spec-from-domain.js";
 import { inferDomainSpec, inferDomainSpecResult } from "../src/domain/mock-domain-spec.js";
 import { softwareFreelancePack } from "../src/domain/software-freelance-pack.js";
 import { scoreEvalRun, summarizeEvalResults } from "../src/evals/scoring.js";
+import type { AppSpec } from "../src/app-spec/app-spec.js";
 import type { DomainSpec } from "../src/domain/domain-spec.js";
 import type { EvalCase } from "../src/evals/types.js";
 import type { RunDemoResult } from "../src/orchestrator.js";
@@ -149,6 +150,17 @@ describe("eval scoring", () => {
     );
   });
 
+  it("fails when trace AppSpec omits acceptance scenario coverage", async () => {
+    const spec = inferDomainSpec("Build a booking system for a barber shop");
+    const appSpec = appSpecFromDomainSpec(spec);
+    appSpec.acceptanceScenarios = appSpec.acceptanceScenarios.filter((scenario) => scenario.id === "list-seeded-records");
+    const result = await scoreEvalRun(spec.sourceGoal, "run", await createEvalFixture(spec, { traceAppSpec: appSpec }), { durationMs: 1 });
+
+    expect(result.hardGatePassed).toBe(false);
+    expect(result.failureCategory).toBe("domain_mismatch");
+    expect(result.failures).toEqual(expect.arrayContaining([expect.objectContaining({ code: "app_acceptance_scenario_missing" })]));
+  });
+
   it("fails when stale generic or template text leaks into generated output", async () => {
     const spec = inferDomainSpec("Build an equipment checkout system for a university club");
     const result = await scoreEvalRun(
@@ -224,6 +236,7 @@ async function createEvalFixture(
     appReadme?: string;
     serverSource?: string;
     traceDomainInference?: unknown;
+    traceAppSpec?: AppSpec;
   } = {},
 ): Promise<RunDemoResult> {
   const finalPackageDir = join(tmpdir(), `agentsim-eval-score-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -234,6 +247,9 @@ async function createEvalFixture(
 
   if (!omittedTraceFiles.has("domain-spec.json")) {
     await writeFixtureFile(finalPackageDir, "trace/domain-spec.json", JSON.stringify(options.traceDomainSpec ?? spec, null, 2));
+  }
+  if (!omittedTraceFiles.has("app-spec.json")) {
+    await writeFixtureFile(finalPackageDir, "trace/app-spec.json", JSON.stringify(options.traceAppSpec ?? appSpecFromDomainSpec(spec), null, 2));
   }
   if (!omittedTraceFiles.has("context-eval.json")) {
     await writeFixtureFile(
@@ -366,7 +382,7 @@ function createEvalCase(spec: DomainSpec, overrides: Partial<EvalCase["expected"
 async function writeOtherTraceFiles(finalPackageDir: string, omittedFileNames: Set<string>): Promise<void> {
   for (const relativePath of softwareFreelancePack.requiredTraceFiles) {
     const fileName = relativePath.replace(/^trace\//, "");
-    if (omittedFileNames.has(fileName) || fileName === "domain-spec.json" || fileName === "context-eval.json") {
+    if (omittedFileNames.has(fileName) || fileName === "domain-spec.json" || fileName === "app-spec.json" || fileName === "context-eval.json") {
       continue;
     }
     await writeFixtureFile(finalPackageDir, relativePath, traceFileContent(fileName));

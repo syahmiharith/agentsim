@@ -1,4 +1,4 @@
-export type EvalSuite = "smoke" | "domain";
+export type EvalSuite = "smoke" | "domain" | "unseen-simple-apps";
 
 export type EvalDifficulty = "smoke" | "easy" | "medium" | "hard";
 
@@ -21,6 +21,7 @@ export interface EvalCase {
   prompt: string;
   expected: {
     appName: string;
+    appArchetype?: "crud-workflow" | "booking-lite" | "inventory-lite";
     primaryEntity: string;
     requiredFields: string[];
     requiredStatuses: string[];

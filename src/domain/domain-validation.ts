@@ -36,11 +36,26 @@ export function validateDomainSpec(spec: DomainSpec): ValidationResult {
   validateWorkflow(spec, failures);
   validateSeedRecords(spec, failures);
   validateGeneratedArtifactTypes(spec.generatedArtifactTypes, failures);
+  validateOptionalStringArray(spec.unresolvedQuestions, "unresolvedQuestions", failures);
+  validateOptionalStringArray(spec.deferredFeatures, "deferredFeatures", failures);
 
   return {
     ok: failures.length === 0,
     failures
   };
+}
+
+function validateOptionalStringArray(value: string[] | undefined, path: string, failures: string[]): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!Array.isArray(value)) {
+    failures.push(`${path} must be an array`);
+    return;
+  }
+  if (value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+    failures.push(`${path} must contain non-empty strings`);
+  }
 }
 
 function validateEntity(entity: DomainSpec["primaryEntity"] | undefined, path: string, failures: string[]): void {

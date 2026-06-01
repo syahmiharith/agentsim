@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainSpec } from "../domain/domain-spec.js";
+import type { AppSpec } from "../app-spec/app-spec.js";
 import { softwareFreelancePack } from "../domain/software-freelance-pack.js";
 import type { RunDemoResult } from "../orchestrator.js";
 import type { ContextEvaluation, RunSummary, ValidationResult } from "../types.js";
@@ -16,7 +17,7 @@ import {
   assertRequiredArtifacts,
   assertTraceCompleteness,
   readJsonFile,
-  readText
+  readText,
 } from "./assertions.js";
 import type { EvalCase, EvalFailure, EvalFailureCategory } from "./types.js";
 
@@ -85,7 +86,12 @@ export interface EvalSummary {
   averageCommandChecksPerCase: number;
 }
 
-export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: string, result: RunDemoResult, options: { durationMs?: number; runtimeApi?: boolean } = {}): Promise<EvalCaseResult> {
+export async function scoreEvalRun(
+  evalCaseOrPrompt: EvalCase | string,
+  runId: string,
+  result: RunDemoResult,
+  options: { durationMs?: number; runtimeApi?: boolean } = {},
+): Promise<EvalCaseResult> {
   const evalCase = typeof evalCaseOrPrompt === "string" ? caseFromDomainSpec(evalCaseOrPrompt, result.domainSpec) : evalCaseOrPrompt;
   const root = result.finalPackageDir;
   const failures: EvalFailure[] = [];
@@ -93,8 +99,8 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const requiredTraceFiles = [...softwareFreelancePack.requiredTraceFiles, "trace/run-summary.json"];
   const requiredFinalPackageFiles = [...softwareFreelancePack.requiredFinalPackageFiles, ...evalCase.expected.requiredArtifacts];
 
-  failures.push(...await assertRequiredArtifacts(root, requiredFinalPackageFiles));
-  failures.push(...await assertTraceCompleteness(root, requiredTraceFiles));
+  failures.push(...(await assertRequiredArtifacts(root, requiredFinalPackageFiles)));
+  failures.push(...(await assertTraceCompleteness(root, requiredTraceFiles)));
 
   if (result.taskRun.status !== "COMPLETED") {
     failures.push({
@@ -102,7 +108,7 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
       message: `Run did not complete: ${result.taskRun.status}`,
       severity: "error",
       expected: "COMPLETED",
-      actual: result.taskRun.status
+      actual: result.taskRun.status,
     });
   }
 
@@ -111,19 +117,27 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   if (!validationResult) {
     failures.push({ code: "validation_result_missing", message: "Missing final validation result.", severity: "error", path: "trace/run-summary.json" });
   } else if (!validationResult.ok) {
-    failures.push(...validationResult.failures.map((message) => ({ code: "final_package_validation_failed", message, severity: "error" as const, path: "trace/run-summary.json" })));
+    failures.push(
+      ...validationResult.failures.map((message) => ({
+        code: "final_package_validation_failed",
+        message,
+        severity: "error" as const,
+        path: "trace/run-summary.json",
+      })),
+    );
   }
 
   const traceDomainSpec = await readJsonFile<DomainSpec>(root, "trace/domain-spec.json");
+  const traceAppSpec = await readJsonFile<AppSpec>(root, "trace/app-spec.json");
   const traceDomainInference = await readJsonFile<DomainInferenceTrace>(root, "trace/domain-inference.json");
   const contextEvaluation = (await readJsonFile<{ evaluation: ContextEvaluation }>(root, "trace/context-eval.json"))?.evaluation;
-  const appSource = await readText(root, "app/src/App.tsx") ?? "";
-  const appReadme = await readText(root, "app/README.md") ?? "";
-  const requirements = await readText(root, "planning/requirements.md") ?? "";
-  const projectSummary = await readText(root, "client/project-summary.md") ?? "";
-  const qaReport = await readText(root, "review/qa-report.md") ?? "";
-  const codeReview = await readText(root, "review/code-review.md") ?? "";
-  const knownIssues = await readText(root, "review/known-issues.md") ?? "";
+  const appSource = (await readText(root, "app/src/App.tsx")) ?? "";
+  const appReadme = (await readText(root, "app/README.md")) ?? "";
+  const requirements = (await readText(root, "planning/requirements.md")) ?? "";
+  const projectSummary = (await readText(root, "client/project-summary.md")) ?? "";
+  const qaReport = (await readText(root, "review/qa-report.md")) ?? "";
+  const codeReview = (await readText(root, "review/code-review.md")) ?? "";
+  const knownIssues = (await readText(root, "review/known-issues.md")) ?? "";
   const keyDocs = [requirements, projectSummary].join("\n");
   const appSurface = [appSource, appReadme].join("\n");
   const fullSurface = [appSurface, keyDocs, qaReport, codeReview, knownIssues].join("\n");
@@ -146,7 +160,38 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
           severity: "error",
           path: "trace/domain-spec.json",
           expected: field,
-          actual: fieldNames
+          actual: fieldNames,
+        });
+      }
+    }
+  }
+
+  if (evalCase.expected.appArchetype) {
+    if (!traceAppSpec || traceAppSpec.appArchetype !== evalCase.expected.appArchetype) {
+      failures.push({
+        code: "app_archetype_mismatch",
+        message: `Trace app spec archetype did not match expected ${evalCase.expected.appArchetype}.`,
+        severity: "error",
+        path: "trace/app-spec.json",
+        expected: evalCase.expected.appArchetype,
+        actual: traceAppSpec?.appArchetype,
+      });
+    }
+  }
+  if (traceAppSpec) {
+    const acceptanceText = (traceAppSpec.acceptanceScenarios ?? [])
+      .map((scenario) => `${scenario.name} ${scenario.steps.join(" ")} ${scenario.expectedOutcome}`)
+      .join(" ")
+      .toLowerCase();
+    for (const behavior of ["list", "create", "status"]) {
+      if (!acceptanceText.includes(behavior)) {
+        failures.push({
+          code: "app_acceptance_scenario_missing",
+          message: `Trace app spec acceptance scenarios do not cover ${behavior} behavior.`,
+          severity: "error",
+          path: "trace/app-spec.json",
+          expected: behavior,
+          actual: traceAppSpec.acceptanceScenarios,
         });
       }
     }
@@ -159,7 +204,7 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
         code: "domain_inference_unexpected_fallback",
         message: "Domain inference used fallback for a non-fallback eval case.",
         severity: "warn",
-        path: "trace/domain-inference.json"
+        path: "trace/domain-inference.json",
       });
     }
     if (traceDomainInference.needsClarification) {
@@ -167,27 +212,27 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
         code: "domain_inference_needs_clarification",
         message: "Domain inference marked this strict eval case as needing clarification.",
         severity: "warn",
-        path: "trace/domain-inference.json"
+        path: "trace/domain-inference.json",
       });
     }
   }
 
   for (const phrase of evalCase.expected.requiredPhrases) {
-    failures.push(...await assertFileContains(root, phrase.path, phrase.terms));
+    failures.push(...(await assertFileContains(root, phrase.path, phrase.terms)));
   }
   for (const phrase of evalCase.expected.forbiddenPhrases) {
-    failures.push(...await assertFileNotContains(root, phrase.path, phrase.terms));
+    failures.push(...(await assertFileNotContains(root, phrase.path, phrase.terms)));
   }
   for (const commandCheck of evalCase.expected.commands ?? []) {
-    failures.push(...await assertCommandPasses(root, commandCheck));
+    failures.push(...(await assertCommandPasses(root, commandCheck)));
   }
-  failures.push(...await assertContextEvalOk(root));
+  failures.push(...(await assertContextEvalOk(root)));
   const entitySlug = traceDomainSpec?.primaryEntity?.slug ?? result.domainSpec.primaryEntity.slug;
   const apiStatuses = traceDomainSpec?.workflowStatuses ?? evalCase.expected.requiredStatuses;
-  failures.push(...await assertGeneratedApiBehavior(root, entitySlug, apiStatuses));
+  failures.push(...(await assertGeneratedApiBehavior(root, entitySlug, apiStatuses)));
   if (options.runtimeApi) {
     const apiFields = traceDomainSpec?.primaryEntity?.fields ?? result.domainSpec.primaryEntity.fields;
-    failures.push(...await assertGeneratedApiRuntimeBehavior(root, entitySlug, apiStatuses, apiFields));
+    failures.push(...(await assertGeneratedApiRuntimeBehavior(root, entitySlug, apiStatuses, apiFields)));
   }
 
   const appNameAppearsInApp = containsText(appSurface, evalCase.expected.appName);
@@ -204,19 +249,44 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const requiredCommandChecksRun = evalCase.expected.commands?.filter((command) => !command.optional).length ?? 0;
 
   if (!appNameAppearsInApp) {
-    failures.push({ code: "app_name_missing", message: `App surface does not contain app name ${evalCase.expected.appName}`, severity: "error", path: "app/src/App.tsx" });
+    failures.push({
+      code: "app_name_missing",
+      message: `App surface does not contain app name ${evalCase.expected.appName}`,
+      severity: "error",
+      path: "app/src/App.tsx",
+    });
   }
   if (!primaryEntityAppearsInApp) {
-    failures.push({ code: "primary_entity_missing", message: `App surface does not contain primary entity ${evalCase.expected.primaryEntity}`, severity: "error", path: "app/src/App.tsx" });
+    failures.push({
+      code: "primary_entity_missing",
+      message: `App surface does not contain primary entity ${evalCase.expected.primaryEntity}`,
+      severity: "error",
+      path: "app/src/App.tsx",
+    });
   }
   if (!workflowStatusesAppearInApp) {
-    failures.push({ code: "workflow_statuses_missing", message: "App source does not contain every workflow status.", severity: "error", path: "app/src/App.tsx" });
+    failures.push({
+      code: "workflow_statuses_missing",
+      message: "App source does not contain every workflow status.",
+      severity: "error",
+      path: "app/src/App.tsx",
+    });
   }
   if (!requiredFieldsAppearInApp) {
-    failures.push({ code: "required_fields_missing", message: "App source does not contain every required field.", severity: "error", path: "app/src/App.tsx" });
+    failures.push({
+      code: "required_fields_missing",
+      message: "App source does not contain every required field.",
+      severity: "error",
+      path: "app/src/App.tsx",
+    });
   }
   if (!domainDocsMatch) {
-    failures.push({ code: "domain_docs_mismatch", message: "Key markdown artifacts do not match the expected domain.", severity: "error", path: "planning/requirements.md" });
+    failures.push({
+      code: "domain_docs_mismatch",
+      message: "Key markdown artifacts do not match the expected domain.",
+      severity: "error",
+      path: "planning/requirements.md",
+    });
   }
   if (promptLeakageDetected) {
     failures.push({ code: "raw_prompt_leaked", message: "Runnable app surface contains the raw prompt.", severity: "error", path: "app/src/App.tsx" });
@@ -234,33 +304,54 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
   const requiredArtifactFailures = failures.filter((item) => item.code === "final_package_file_missing" || item.code === "trace_file_missing").length;
   const requiredPhraseFailures = failures.filter((item) => item.code === "required_phrase_missing").length;
   const forbiddenPhraseFailures = failures.filter((item) => item.code === "forbidden_phrase_present").length;
-  const domainFailures = failures.filter((item) => item.severity === "error" && (item.code.startsWith("domain_") || item.code === "app_name_missing" || item.code === "primary_entity_missing" || item.code === "workflow_statuses_missing" || item.code === "required_fields_missing" || item.code === "domain_docs_mismatch")).length;
-  const traceFailures = failures.filter((item) => item.code === "trace_file_missing" || item.code.startsWith("context_") || item.code.includes("lineage")).length;
+  const domainFailures = failures.filter(
+    (item) =>
+      item.severity === "error" &&
+      (item.code.startsWith("domain_") ||
+        item.code === "app_name_missing" ||
+        item.code === "primary_entity_missing" ||
+        item.code === "workflow_statuses_missing" ||
+        item.code === "required_fields_missing" ||
+        item.code === "domain_docs_mismatch" ||
+        item.code === "app_acceptance_scenario_missing"),
+  ).length;
+  const traceFailures = failures.filter(
+    (item) => item.code === "trace_file_missing" || item.code.startsWith("context_") || item.code.includes("lineage"),
+  ).length;
   const reviewFailures = failures.filter((item) => item.path?.startsWith("review/") && item.severity === "error").length;
   const warningCount = failures.filter((item) => item.severity === "warn").length;
   const errorCount = failures.filter((item) => item.severity === "error").length;
 
-  const acceptanceCriteriaScore = ratio(1 + evalCase.expected.requiredPhrases.reduce((sum, item) => sum + item.terms.length, 0), requiredPhraseFailures + (domainDocsMatch ? 0 : 1));
-  const runnableAppScore = ratio(requiredAppFiles.length + 1 + 2 + requiredCommandChecksRun, appFileFailures + (finalValidationOk ? 0 : 1) + apiFailures + commandFailures);
+  const acceptanceCriteriaScore = ratio(
+    1 + evalCase.expected.requiredPhrases.reduce((sum, item) => sum + item.terms.length, 0),
+    requiredPhraseFailures + (domainDocsMatch ? 0 : 1),
+  );
+  const runnableAppScore = ratio(
+    requiredAppFiles.length + 1 + 2 + requiredCommandChecksRun,
+    appFileFailures + (finalValidationOk ? 0 : 1) + apiFailures + commandFailures,
+  );
   const domainFidelityScore = ratio(
-    2 + evalCase.expected.requiredFields.length + evalCase.expected.requiredStatuses.length + evalCase.expected.forbiddenPhrases.reduce((sum, item) => sum + item.terms.length, 0),
-    domainFailures + forbiddenPhraseFailures
+    2 +
+      evalCase.expected.requiredFields.length +
+      evalCase.expected.requiredStatuses.length +
+      evalCase.expected.forbiddenPhrases.reduce((sum, item) => sum + item.terms.length, 0),
+    domainFailures + forbiddenPhraseFailures,
   );
   const packageCompletenessScore = ratio(requiredFinalPackageFiles.length, requiredArtifactFailures);
   const traceabilityScore = ratio(requiredTraceFiles.length + 2, traceFailures + (contextCoverageOk ? 0 : 1) + (contextProvenanceOk ? 0 : 1));
   const reviewSignals = [
     qaReport.length > 0 && containsText(qaReport, "Generated App Validation"),
     codeReview.length > 0 && containsText(codeReview, "Findings"),
-    knownIssues.length > 0 && containsText(knownIssues, "Known Issues")
+    knownIssues.length > 0 && containsText(knownIssues, "Known Issues"),
   ];
   const reviewabilityScore = ratio(3, reviewFailures + reviewSignals.filter((ok) => !ok).length);
   const qualityScore = roundScore(
-    (0.30 * acceptanceCriteriaScore) +
-    (0.20 * runnableAppScore) +
-    (0.20 * domainFidelityScore) +
-    (0.10 * packageCompletenessScore) +
-    (0.10 * traceabilityScore) +
-    (0.10 * reviewabilityScore)
+    0.3 * acceptanceCriteriaScore +
+      0.2 * runnableAppScore +
+      0.2 * domainFidelityScore +
+      0.1 * packageCompletenessScore +
+      0.1 * traceabilityScore +
+      0.1 * reviewabilityScore,
   );
   const hardGatePassed = failures.every((item) => !hardGateCodes.has(item.code) || item.severity !== "error");
 
@@ -309,7 +400,7 @@ export async function scoreEvalRun(evalCaseOrPrompt: EvalCase | string, runId: s
     durationMs: options.durationMs ?? durationFromTaskRun(result),
     validationResult,
     failureCategory: categorizeFailures(failures, result.taskRun.status),
-    failures
+    failures,
   };
 }
 
@@ -325,22 +416,26 @@ export function summarizeEvalResults(results: EvalCaseResult[]): EvalSummary {
     failed: results.length - passed,
     acceptedRuns: results.filter((result) => result.accepted).length,
     averageQualityScore: roundScore(results.reduce((sum, result) => sum + result.qualityScore, 0) / Math.max(1, results.length)),
-    p50DurationMs: percentile(results.map((result) => result.durationMs), 50),
-    p95DurationMs: percentile(results.map((result) => result.durationMs), 95),
+    p50DurationMs: percentile(
+      results.map((result) => result.durationMs),
+      50,
+    ),
+    p95DurationMs: percentile(
+      results.map((result) => result.durationMs),
+      95,
+    ),
     failureCategories,
     totalWarnings: results.reduce((sum, result) => sum + result.warningCount, 0),
     totalErrors: results.reduce((sum, result) => sum + result.errorCount, 0),
     commandChecksRun: results.reduce((sum, result) => sum + result.commandChecksRun, 0),
     requiredCommandChecksRun: results.reduce((sum, result) => sum + result.requiredCommandChecksRun, 0),
     commandChecksPassed: results.filter((result) => result.commandChecksPassed).length,
-    averageCommandChecksPerCase: roundScore(results.reduce((sum, result) => sum + result.commandChecksRun, 0) / Math.max(1, results.length))
+    averageCommandChecksPerCase: roundScore(results.reduce((sum, result) => sum + result.commandChecksRun, 0) / Math.max(1, results.length)),
   };
 }
 
 export function computeQualityAdjustedPackagesPerHour(results: EvalCaseResult[], wallClockMs: number): number {
-  const acceptedQuality = results
-    .filter((result) => result.accepted)
-    .reduce((sum, result) => sum + result.qualityScore, 0);
+  const acceptedQuality = results.filter((result) => result.accepted).reduce((sum, result) => sum + result.qualityScore, 0);
   return roundScore(acceptedQuality / Math.max(wallClockMs / 3_600_000, 1 / 3_600_000));
 }
 
@@ -381,7 +476,17 @@ function categorizeFailures(failures: EvalFailure[], status: string): EvalFailur
   if (failures.some((failure) => failure.code.startsWith("context_"))) {
     return "context";
   }
-  if (failures.some((failure) => failure.code.startsWith("domain_") || failure.code.includes("phrase") || failure.code.includes("entity") || failure.code.includes("field") || failure.code.includes("status"))) {
+  if (
+    failures.some(
+      (failure) =>
+        failure.code.startsWith("domain_") ||
+        failure.code === "app_acceptance_scenario_missing" ||
+        failure.code.includes("phrase") ||
+        failure.code.includes("entity") ||
+        failure.code.includes("field") ||
+        failure.code.includes("status"),
+    )
+  ) {
     return "domain_mismatch";
   }
   if (status !== "COMPLETED") {
@@ -401,10 +506,18 @@ function caseFromDomainSpec(prompt: string, spec: DomainSpec): EvalCase {
       primaryEntity: spec.primaryEntity.name,
       requiredFields: spec.primaryEntity.fields.filter((field) => field.required).map((field) => field.name),
       requiredStatuses: spec.workflowStatuses,
-      requiredArtifacts: ["app/package.json", "app/src/App.tsx", "app/server.js", "app/README.md", "trace/domain-spec.json", "trace/context-eval.json", "trace/run-summary.json"],
+      requiredArtifacts: [
+        "app/package.json",
+        "app/src/App.tsx",
+        "app/server.js",
+        "app/README.md",
+        "trace/domain-spec.json",
+        "trace/context-eval.json",
+        "trace/run-summary.json",
+      ],
       requiredPhrases: [],
-      forbiddenPhrases: []
-    }
+      forbiddenPhrases: [],
+    },
   };
 }
 
@@ -414,7 +527,7 @@ function isDomainSpec(value: DomainSpec | undefined): value is DomainSpec {
     typeof value.appName === "string" &&
     typeof value.primaryEntity?.name === "string" &&
     Array.isArray(value.primaryEntity?.fields) &&
-    Array.isArray(value.workflowStatuses)
+    Array.isArray(value.workflowStatuses),
   );
 }
 
@@ -435,7 +548,7 @@ function isDomainInferenceTrace(value: DomainInferenceTrace | undefined): value 
     Array.isArray(value.matchedKeywords) &&
     Array.isArray(value.warnings) &&
     typeof value.needsClarification === "boolean" &&
-    typeof value.fallbackUsed === "boolean"
+    typeof value.fallbackUsed === "boolean",
   );
 }
 
@@ -466,22 +579,26 @@ async function detectSecretLeakage(root: string, prompt: string): Promise<boolea
     return false;
   }
   const files = await listFiles(root);
-  const contents = await Promise.all(files.map(async (path) => {
-    try {
-      return await readText(root, path) ?? "";
-    } catch {
-      return "";
-    }
-  }));
+  const contents = await Promise.all(
+    files.map(async (path) => {
+      try {
+        return (await readText(root, path)) ?? "";
+      } catch {
+        return "";
+      }
+    }),
+  );
   return secrets.some((secret) => contents.join("\n").includes(secret));
 }
 
 async function listFiles(root: string, prefix = ""): Promise<string[]> {
   const entries = await readdir(join(root, prefix), { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    return entry.isDirectory() ? listFiles(root, path) : [path];
-  }));
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      return entry.isDirectory() ? listFiles(root, path) : [path];
+    }),
+  );
   return files.flat();
 }
 
@@ -528,7 +645,8 @@ const hardGateCodes = new Set([
   "api_runtime_created_record_missing",
   "api_runtime_status_update_failed",
   "api_runtime_failed",
+  "app_acceptance_scenario_missing",
   "seed_data_missing",
   "seed_data_invalid",
-  "secret_leaked"
+  "secret_leaked",
 ]);

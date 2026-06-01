@@ -31,6 +31,7 @@ const requiredFinalPackageFiles = [
   "app/src/main.tsx",
   "app/src/styles.css",
   "app/README.md",
+  "app/test-report.md",
 ];
 
 const reviewRubric: ReviewRubricCriterion[] = [
@@ -76,6 +77,7 @@ export const softwareFreelancePack: DomainPack = {
     "trace/context-eval.json",
     "trace/approvals.json",
     "trace/decisions.json",
+    "trace/product-brief.json",
     "trace/domain-spec.json",
     "trace/app-spec.json",
     "trace/app-validation.json",

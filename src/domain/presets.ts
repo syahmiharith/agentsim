@@ -1,10 +1,11 @@
+import type { AppArchetype } from "../app-spec/app-spec.js";
 import type { DomainSpec, EntitySpec, FieldSpec, ScreenSpec } from "./domain-spec.js";
 
 export interface DomainPreset {
   id: string;
   appName: string;
   appSlug: string;
-  appArchetype?: "simple-workflow";
+  appArchetype?: AppArchetype;
   domain: string;
   keywords: string[];
   priority?: number;
@@ -39,7 +40,7 @@ export const defaultGeneratedArtifactTypes = [
   "code-review",
   "known-issues",
   "handoff-notes",
-  "user-guide"
+  "user-guide",
 ];
 
 export const domainPresets: DomainPreset[] = [
@@ -47,7 +48,7 @@ export const domainPresets: DomainPreset[] = [
     id: "barber-booking",
     appName: "Barber Booking Desk",
     appSlug: "barber-booking-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "booking-lite",
     domain: "barber booking",
     keywords: ["barber", "booking"],
     primaryEntity: entity("Booking", "Bookings", "bookings", [
@@ -56,7 +57,7 @@ export const domainPresets: DomainPreset[] = [
       field("barber", "Barber", "text"),
       field("appointmentDateTime", "Appointment date/time", "datetime"),
       field("phone", "Phone", "text"),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["front desk staff", "barbers", "shop manager"],
     screens: screens("New Booking", "Booking Schedule", "Admin Queue"),
@@ -66,15 +67,31 @@ export const domainPresets: DomainPreset[] = [
     assumptions: ["The shop needs a lightweight scheduling prototype before calendar integrations.", "Staff can manage bookings from one shared admin view."],
     risks: ["Double-booking rules are not modeled yet.", "Production use needs calendar sync and customer notifications."],
     seedRecords: [
-      { customerName: "Ari Lane", service: "Haircut", barber: "Mika", appointmentDateTime: "2026-06-04T10:00", phone: "555-0141", notes: "Prefers morning appointments.", status: "Confirmed" },
-      { customerName: "Noah Chen", service: "Beard trim", barber: "Sam", appointmentDateTime: "2026-06-04T13:30", phone: "555-0188", notes: "First visit.", status: "Requested" }
-    ]
+      {
+        customerName: "Ari Lane",
+        service: "Haircut",
+        barber: "Mika",
+        appointmentDateTime: "2026-06-04T10:00",
+        phone: "555-0141",
+        notes: "Prefers morning appointments.",
+        status: "Confirmed",
+      },
+      {
+        customerName: "Noah Chen",
+        service: "Beard trim",
+        barber: "Sam",
+        appointmentDateTime: "2026-06-04T13:30",
+        phone: "555-0188",
+        notes: "First visit.",
+        status: "Requested",
+      },
+    ],
   },
   {
     id: "clinic-appointment",
     appName: "Clinic Appointment Desk",
     appSlug: "clinic-appointment-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "booking-lite",
     domain: "clinic appointment",
     keywords: ["clinic", "appointment"],
     primaryEntity: entity("Appointment", "Appointments", "appointments", [
@@ -83,7 +100,7 @@ export const domainPresets: DomainPreset[] = [
       field("visitReason", "Visit reason", "text"),
       field("appointmentDateTime", "Appointment date/time", "datetime"),
       field("phone", "Phone", "text"),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["reception staff", "clinic admin", "care providers"],
     screens: screens("New Appointment", "Appointment List", "Clinic Admin"),
@@ -93,15 +110,31 @@ export const domainPresets: DomainPreset[] = [
     assumptions: ["The clinic wants a workflow prototype before EHR integration.", "Reception staff can manage scheduling from one shared queue."],
     risks: ["Production use must address privacy, authentication, and audit requirements.", "Provider availability rules are not modeled yet."],
     seedRecords: [
-      { patientName: "Mina Patel", provider: "Dr. Rivera", visitReason: "Annual checkup", appointmentDateTime: "2026-06-05T09:30", phone: "555-0160", notes: "Bring lab results.", status: "Scheduled" },
-      { patientName: "Jon Bell", provider: "Nurse Kim", visitReason: "Follow-up", appointmentDateTime: "2026-06-05T11:00", phone: "555-0119", notes: "Prefers text reminder.", status: "Requested" }
-    ]
+      {
+        patientName: "Mina Patel",
+        provider: "Dr. Rivera",
+        visitReason: "Annual checkup",
+        appointmentDateTime: "2026-06-05T09:30",
+        phone: "555-0160",
+        notes: "Bring lab results.",
+        status: "Scheduled",
+      },
+      {
+        patientName: "Jon Bell",
+        provider: "Nurse Kim",
+        visitReason: "Follow-up",
+        appointmentDateTime: "2026-06-05T11:00",
+        phone: "555-0119",
+        notes: "Prefers text reminder.",
+        status: "Requested",
+      },
+    ],
   },
   {
     id: "restaurant-reservation",
     appName: "Restaurant Reservation Desk",
     appSlug: "restaurant-reservation-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "booking-lite",
     domain: "restaurant reservation",
     keywords: ["restaurant", "reservation"],
     primaryEntity: entity("Reservation", "Reservations", "reservations", [
@@ -110,25 +143,44 @@ export const domainPresets: DomainPreset[] = [
       field("reservationDateTime", "Reservation date/time", "datetime"),
       field("phone", "Phone", "text"),
       selectField("seatingPreference", "Seating preference", ["No preference", "Indoor", "Patio", "Bar"]),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["host staff", "restaurant manager", "front-of-house team"],
     screens: screens("New Reservation", "Reservation List", "Host Stand View"),
     workflowStatuses: ["Requested", "Confirmed", "Seated", "Completed", "Cancelled"],
     coreActions: ["Create reservation", "View reservations", "Update reservation status", "Filter by status"],
     approvalPoints: ["Confirm reservation", "Cancel confirmed reservation"],
-    assumptions: ["The restaurant needs a host-stand workflow prototype before table management integrations.", "Staff can handle reservations from one list view."],
+    assumptions: [
+      "The restaurant needs a host-stand workflow prototype before table management integrations.",
+      "Staff can handle reservations from one list view.",
+    ],
     risks: ["Table capacity and turn-time rules are not modeled yet.", "Production use needs notifications and conflict checks."],
     seedRecords: [
-      { guestName: "Elena Park", partySize: 4, reservationDateTime: "2026-06-06T19:00", phone: "555-0172", seatingPreference: "Patio", notes: "Birthday dinner.", status: "Confirmed" },
-      { guestName: "Chris Wong", partySize: 2, reservationDateTime: "2026-06-06T20:15", phone: "555-0190", seatingPreference: "Indoor", notes: "Quiet table if possible.", status: "Requested" }
-    ]
+      {
+        guestName: "Elena Park",
+        partySize: 4,
+        reservationDateTime: "2026-06-06T19:00",
+        phone: "555-0172",
+        seatingPreference: "Patio",
+        notes: "Birthday dinner.",
+        status: "Confirmed",
+      },
+      {
+        guestName: "Chris Wong",
+        partySize: 2,
+        reservationDateTime: "2026-06-06T20:15",
+        phone: "555-0190",
+        seatingPreference: "Indoor",
+        notes: "Quiet table if possible.",
+        status: "Requested",
+      },
+    ],
   },
   {
     id: "equipment-checkout",
     appName: "Club Equipment Checkout",
     appSlug: "club-equipment-checkout",
-    appArchetype: "simple-workflow",
+    appArchetype: "inventory-lite",
     domain: "equipment checkout",
     keywords: ["equipment", "checkout", "university club"],
     primaryEntity: entity("Checkout", "Checkouts", "checkouts", [
@@ -137,7 +189,7 @@ export const domainPresets: DomainPreset[] = [
       field("checkoutDate", "Checkout date", "date"),
       field("dueDate", "Due date", "date"),
       selectField("condition", "Condition", ["Good", "Fair", "Needs review"]),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["club officers", "equipment managers", "club members"],
     screens: screens("New Checkout", "Equipment Checkout List", "Club Admin"),
@@ -147,15 +199,31 @@ export const domainPresets: DomainPreset[] = [
     assumptions: ["Club officers need a lightweight tracker before inventory system integration.", "Members can request equipment through a shared form."],
     risks: ["Production use needs member authentication and damage tracking.", "Availability conflicts are not modeled yet."],
     seedRecords: [
-      { memberName: "Taylor Smith", equipmentItem: "Camera kit", checkoutDate: "2026-06-01", dueDate: "2026-06-08", condition: "Good", notes: "For campus event.", status: "Checked Out" },
-      { memberName: "Jordan Lee", equipmentItem: "Projector", checkoutDate: "2026-06-03", dueDate: "2026-06-05", condition: "Fair", notes: "Needs HDMI adapter.", status: "Requested" }
-    ]
+      {
+        memberName: "Taylor Smith",
+        equipmentItem: "Camera kit",
+        checkoutDate: "2026-06-01",
+        dueDate: "2026-06-08",
+        condition: "Good",
+        notes: "For campus event.",
+        status: "Checked Out",
+      },
+      {
+        memberName: "Jordan Lee",
+        equipmentItem: "Projector",
+        checkoutDate: "2026-06-03",
+        dueDate: "2026-06-05",
+        condition: "Fair",
+        notes: "Needs HDMI adapter.",
+        status: "Requested",
+      },
+    ],
   },
   {
     id: "student-portal",
     appName: "Student Portal Desk",
     appSlug: "student-portal-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "crud-workflow",
     domain: "student service request",
     keywords: ["student", "portal"],
     primaryEntity: entity("Student Request", "Student Requests", "requests", [
@@ -163,7 +231,7 @@ export const domainPresets: DomainPreset[] = [
       field("studentId", "Student ID", "text"),
       selectField("requestType", "Request type", ["Enrollment", "Transcript", "Advising", "Financial aid"]),
       field("targetDate", "Target date", "date", false),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["students", "student services staff", "program administrators"],
     screens: screens("New Student Request", "Student Request List", "Services Admin"),
@@ -171,17 +239,34 @@ export const domainPresets: DomainPreset[] = [
     coreActions: ["Create student request", "View student requests", "Update request status", "Filter by status"],
     approvalPoints: ["Resolve request", "Reject request"],
     assumptions: ["The school needs a lightweight portal workflow before SIS integration.", "Staff can triage student service requests from one queue."],
-    risks: ["Production use needs authentication, FERPA-aware access controls, and audit logging.", "The prototype does not integrate with a student information system."],
+    risks: [
+      "Production use needs authentication, FERPA-aware access controls, and audit logging.",
+      "The prototype does not integrate with a student information system.",
+    ],
     seedRecords: [
-      { studentName: "Iris Nguyen", studentId: "S-1042", requestType: "Transcript", targetDate: "2026-06-09", notes: "Needs unofficial copy.", status: "In Review" },
-      { studentName: "Mateo Brooks", studentId: "S-1188", requestType: "Advising", targetDate: "2026-06-12", notes: "Graduation planning.", status: "Submitted" }
-    ]
+      {
+        studentName: "Iris Nguyen",
+        studentId: "S-1042",
+        requestType: "Transcript",
+        targetDate: "2026-06-09",
+        notes: "Needs unofficial copy.",
+        status: "In Review",
+      },
+      {
+        studentName: "Mateo Brooks",
+        studentId: "S-1188",
+        requestType: "Advising",
+        targetDate: "2026-06-12",
+        notes: "Graduation planning.",
+        status: "Submitted",
+      },
+    ],
   },
   {
     id: "expense-splitter",
     appName: "Expense Splitter Desk",
     appSlug: "expense-splitter-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "crud-workflow",
     domain: "shared expense tracking",
     keywords: ["expense", "splitter"],
     primaryEntity: entity("Expense", "Expenses", "expenses", [
@@ -190,25 +275,28 @@ export const domainPresets: DomainPreset[] = [
       field("amount", "Amount", "number"),
       field("participants", "Participants", "text"),
       selectField("category", "Category", ["Food", "Travel", "Supplies", "Other"]),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["friends", "trip organizers", "small group admins"],
     screens: screens("New Expense", "Expense List", "Settlement Admin"),
     workflowStatuses: ["Logged", "Reviewed", "Split Calculated", "Settled", "Disputed"],
     coreActions: ["Create expense", "View expenses", "Update expense status", "Filter by status"],
     approvalPoints: ["Mark split calculated", "Mark settled"],
-    assumptions: ["The first prototype tracks shared expenses without payment processing.", "Participants can be captured as a simple comma-separated field for review."],
+    assumptions: [
+      "The first prototype tracks shared expenses without payment processing.",
+      "Participants can be captured as a simple comma-separated field for review.",
+    ],
     risks: ["Production use needs account identity and payment reconciliation.", "Advanced split formulas are not modeled yet."],
     seedRecords: [
       { title: "Dinner", paidBy: "Ari", amount: 128, participants: "Ari, Sam, Lee", category: "Food", notes: "Team meal.", status: "Reviewed" },
-      { title: "Train tickets", paidBy: "Lee", amount: 84, participants: "Ari, Sam, Lee", category: "Travel", notes: "Round trip.", status: "Logged" }
-    ]
+      { title: "Train tickets", paidBy: "Lee", amount: 84, participants: "Ari, Sam, Lee", category: "Travel", notes: "Round trip.", status: "Logged" },
+    ],
   },
   {
     id: "small-crm",
     appName: "Small CRM Desk",
     appSlug: "small-crm-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "crud-workflow",
     domain: "small business CRM",
     keywords: ["crm", "customer relationship", "lead"],
     primaryEntity: entity("Lead", "Leads", "leads", [
@@ -217,7 +305,7 @@ export const domainPresets: DomainPreset[] = [
       field("email", "Email", "text"),
       selectField("source", "Source", ["Referral", "Website", "Event", "Outbound"]),
       field("estimatedValue", "Estimated value", "number", false),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["solo business owner", "sales assistant", "operations admin"],
     screens: screens("New Lead", "Lead List", "Pipeline Admin"),
@@ -227,15 +315,31 @@ export const domainPresets: DomainPreset[] = [
     assumptions: ["The business needs a simple pipeline tracker before adopting a full CRM.", "One shared admin queue is enough for a first review."],
     risks: ["Production use needs email integration, access controls, and activity history.", "Forecasting and reminders are outside the MVP."],
     seedRecords: [
-      { companyName: "North Pier Studio", contactName: "Dana Fox", email: "dana@example.com", source: "Referral", estimatedValue: 4200, notes: "Needs quote this week.", status: "Qualified" },
-      { companyName: "Greenline Cafe", contactName: "Omar Chen", email: "omar@example.com", source: "Website", estimatedValue: 1800, notes: "Asked about booking site.", status: "New" }
-    ]
+      {
+        companyName: "North Pier Studio",
+        contactName: "Dana Fox",
+        email: "dana@example.com",
+        source: "Referral",
+        estimatedValue: 4200,
+        notes: "Needs quote this week.",
+        status: "Qualified",
+      },
+      {
+        companyName: "Greenline Cafe",
+        contactName: "Omar Chen",
+        email: "omar@example.com",
+        source: "Website",
+        estimatedValue: 1800,
+        notes: "Asked about booking site.",
+        status: "New",
+      },
+    ],
   },
   {
     id: "landing-page-content",
     appName: "Local Business Landing Desk",
     appSlug: "local-business-landing-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "crud-workflow",
     domain: "landing page content request",
     keywords: ["landing page", "local business"],
     primaryEntity: entity("Content Request", "Content Requests", "requests", [
@@ -243,25 +347,42 @@ export const domainPresets: DomainPreset[] = [
       selectField("section", "Section", ["Hero", "Services", "About", "Contact"]),
       field("headline", "Headline", "text"),
       field("owner", "Owner", "text"),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["business owner", "freelance developer", "content reviewer"],
     screens: screens("New Content Request", "Content Request List", "Landing Page Admin"),
     workflowStatuses: ["Draft", "In Review", "Approved", "Published Copy", "Rejected"],
     coreActions: ["Create content request", "View content requests", "Update request status", "Filter by section or status"],
     approvalPoints: ["Approve landing copy", "Mark copy ready for implementation"],
-    assumptions: ["The first package should organize content and handoff assets before building a public site.", "Publishing is a high-risk action and remains outside the v0 workflow."],
+    assumptions: [
+      "The first package should organize content and handoff assets before building a public site.",
+      "Publishing is a high-risk action and remains outside the v0 workflow.",
+    ],
     risks: ["The prototype does not publish a public website.", "Brand assets and SEO requirements need client review."],
     seedRecords: [
-      { businessName: "Elm Street Bakery", section: "Hero", headline: "Fresh bread every morning", owner: "Nora", notes: "Mention catering.", status: "In Review" },
-      { businessName: "Elm Street Bakery", section: "Services", headline: "Custom cakes and daily pastries", owner: "Nora", notes: "Add seasonal menu later.", status: "Draft" }
-    ]
+      {
+        businessName: "Elm Street Bakery",
+        section: "Hero",
+        headline: "Fresh bread every morning",
+        owner: "Nora",
+        notes: "Mention catering.",
+        status: "In Review",
+      },
+      {
+        businessName: "Elm Street Bakery",
+        section: "Services",
+        headline: "Custom cakes and daily pastries",
+        owner: "Nora",
+        notes: "Add seasonal menu later.",
+        status: "Draft",
+      },
+    ],
   },
   {
     id: "inventory-request",
     appName: "Inventory Request Desk",
     appSlug: "inventory-request-desk",
-    appArchetype: "simple-workflow",
+    appArchetype: "inventory-lite",
     domain: "inventory request",
     keywords: ["flower", "inventory"],
     primaryEntity: entity("Inventory Request", "Inventory Requests", "requests", [
@@ -269,7 +390,7 @@ export const domainPresets: DomainPreset[] = [
       field("quantity", "Quantity", "number"),
       field("requester", "Requester", "text"),
       selectField("priority", "Priority", ["Low", "Normal", "High"]),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["staff", "operations admin", "shop manager"],
     screens: screens("New Request", "Request List", "Admin Queue"),
@@ -280,14 +401,130 @@ export const domainPresets: DomainPreset[] = [
     risks: ["Supplier integrations are not modeled yet.", "Production use needs authentication and durable database storage."],
     seedRecords: [
       { itemName: "White roses", quantity: 48, requester: "Mina", priority: "High", notes: "Needed for weekend arrangements.", status: "Pending" },
-      { itemName: "Sage ribbon rolls", quantity: 12, requester: "Jon", priority: "Normal", notes: "Low stock in wrapping station.", status: "Approved" }
-    ]
+      { itemName: "Sage ribbon rolls", quantity: 12, requester: "Jon", priority: "Normal", notes: "Low stock in wrapping station.", status: "Approved" },
+    ],
+  },
+  {
+    id: "pet-grooming-appointments",
+    appName: "Pet Grooming Scheduler",
+    appSlug: "pet-grooming-scheduler",
+    appArchetype: "booking-lite",
+    domain: "pet grooming appointments",
+    keywords: ["pet", "grooming", "appointment"],
+    primaryEntity: entity("Grooming Appointment", "Grooming Appointments", "appointments", [
+      field("petName", "Pet name", "text"),
+      field("ownerName", "Owner name", "text"),
+      selectField("service", "Service", ["Bath", "Trim", "Full groom"]),
+      field("appointmentDateTime", "Appointment date/time", "datetime"),
+      field("phone", "Phone", "text", false),
+    ]),
+    targetUsers: ["front desk staff", "groomers"],
+    screens: screens("New Appointment", "Grooming Schedule", "Appointment Queue"),
+    workflowStatuses: ["Requested", "Confirmed", "In Progress", "Completed", "Cancelled"],
+    coreActions: ["Create appointment", "View appointments", "Update appointment status"],
+    approvalPoints: ["Confirm appointment", "Cancel appointment"],
+    assumptions: ["Staff can manage grooming appointments from one local schedule view."],
+    risks: ["Calendar sync and customer notifications are deferred."],
+    seedRecords: [
+      { petName: "Mochi", ownerName: "Ari Lane", service: "Bath", appointmentDateTime: "2026-06-05T09:00", phone: "555-0120", status: "Confirmed" },
+    ],
+  },
+  {
+    id: "phone-repair-tickets",
+    appName: "Phone Repair Ticket Desk",
+    appSlug: "phone-repair-ticket-desk",
+    appArchetype: "crud-workflow",
+    domain: "phone repair ticket tracking",
+    keywords: ["repair", "ticket", "phone"],
+    primaryEntity: entity("Repair Ticket", "Repair Tickets", "tickets", [
+      field("customerName", "Customer name", "text"),
+      field("deviceModel", "Device model", "text"),
+      field("issue", "Issue", "textarea"),
+      selectField("priority", "Priority", ["Low", "Normal", "Urgent"]),
+    ]),
+    targetUsers: ["repair staff", "shop manager"],
+    screens: screens("New Ticket", "Repair Queue", "Ticket Review"),
+    workflowStatuses: ["Open", "Diagnosing", "Waiting for Parts", "Ready", "Closed"],
+    coreActions: ["Create repair ticket", "Review tickets", "Update repair status"],
+    approvalPoints: ["Approve repair estimate"],
+    assumptions: ["The shop needs a local repair queue before customer messaging integrations."],
+    risks: ["Payments and customer notifications are deferred."],
+    seedRecords: [{ customerName: "Sam Lee", deviceModel: "Pixel 8", issue: "Cracked screen", priority: "Urgent", status: "Diagnosing" }],
+  },
+  {
+    id: "gym-class-reservations",
+    appName: "Gym Class Reservation Desk",
+    appSlug: "gym-class-reservation-desk",
+    appArchetype: "booking-lite",
+    domain: "gym class reservations",
+    keywords: ["gym", "class", "reservation"],
+    primaryEntity: entity("Class Reservation", "Class Reservations", "reservations", [
+      field("memberName", "Member name", "text"),
+      field("className", "Class name", "text"),
+      field("classDateTime", "Class date/time", "datetime"),
+      selectField("level", "Level", ["Beginner", "All levels", "Advanced"]),
+    ]),
+    targetUsers: ["front desk staff", "fitness instructors"],
+    screens: screens("New Reservation", "Class Schedule", "Reservation Queue"),
+    workflowStatuses: ["Requested", "Reserved", "Attended", "Cancelled"],
+    coreActions: ["Create reservation", "View class reservations", "Update attendance status"],
+    approvalPoints: ["Reserve class seat"],
+    assumptions: ["Class capacity is reviewed manually in this prototype."],
+    risks: ["Membership billing and waitlists are deferred."],
+    seedRecords: [{ memberName: "Nora Kim", className: "Morning Yoga", classDateTime: "2026-06-06T08:00", level: "All levels", status: "Reserved" }],
+  },
+  {
+    id: "camera-rental-checkout",
+    appName: "Camera Rental Checkout Desk",
+    appSlug: "camera-rental-checkout-desk",
+    appArchetype: "inventory-lite",
+    domain: "camera rental checkout",
+    keywords: ["rental", "camera", "checkout"],
+    primaryEntity: entity("Rental Checkout", "Rental Checkouts", "checkouts", [
+      field("customerName", "Customer name", "text"),
+      field("itemName", "Item name", "text"),
+      field("quantity", "Quantity", "number"),
+      field("checkoutDate", "Checkout date", "date"),
+      field("returnDate", "Return date", "date", false),
+    ]),
+    targetUsers: ["rental desk staff", "store manager"],
+    screens: screens("New Checkout", "Rental List", "Return Queue"),
+    workflowStatuses: ["Requested", "Checked Out", "Returned", "Overdue", "Cancelled"],
+    coreActions: ["Create rental checkout", "View rentals", "Update rental status"],
+    approvalPoints: ["Approve rental checkout"],
+    assumptions: ["Availability is reviewed manually in this prototype."],
+    risks: ["Deposits, contracts, and barcode scanning are deferred."],
+    seedRecords: [
+      { customerName: "Jamie Park", itemName: "Sony A7 body", quantity: 1, checkoutDate: "2026-06-07", returnDate: "2026-06-09", status: "Checked Out" },
+    ],
+  },
+  {
+    id: "volunteer-shift-signup",
+    appName: "Volunteer Shift Signup Desk",
+    appSlug: "volunteer-shift-signup-desk",
+    appArchetype: "booking-lite",
+    domain: "volunteer shift signup",
+    keywords: ["volunteer", "shift", "signup"],
+    primaryEntity: entity("Shift Signup", "Shift Signups", "signups", [
+      field("volunteerName", "Volunteer name", "text"),
+      field("shiftName", "Shift name", "text"),
+      field("shiftDateTime", "Shift date/time", "datetime"),
+      field("role", "Role", "text", false),
+    ]),
+    targetUsers: ["coordinators", "volunteers"],
+    screens: screens("New Signup", "Shift Schedule", "Signup Queue"),
+    workflowStatuses: ["Requested", "Confirmed", "Completed", "Cancelled"],
+    coreActions: ["Create shift signup", "View signups", "Update signup status"],
+    approvalPoints: ["Confirm volunteer shift"],
+    assumptions: ["Coordinators manually manage capacity in this prototype."],
+    risks: ["Public signup links and reminders are deferred."],
+    seedRecords: [{ volunteerName: "Iris Chen", shiftName: "Food bank morning", shiftDateTime: "2026-06-08T09:00", role: "Greeter", status: "Confirmed" }],
   },
   {
     id: "fallback-client-request-tracker",
     appName: "Client Request Tracker",
     appSlug: "client-request-tracker",
-    appArchetype: "simple-workflow",
+    appArchetype: "crud-workflow",
     domain: "client request tracking",
     keywords: [],
     primaryEntity: entity("Request", "Requests", "requests", [
@@ -295,7 +532,7 @@ export const domainPresets: DomainPreset[] = [
       field("requester", "Requester", "text"),
       selectField("priority", "Priority", ["Low", "Normal", "High"]),
       field("targetDate", "Target date", "date", false),
-      field("notes", "Notes", "textarea", false)
+      field("notes", "Notes", "textarea", false),
     ]),
     targetUsers: ["client-facing staff", "project admin", "delivery lead"],
     screens: screens("New Request", "Request List", "Admin Queue"),
@@ -306,10 +543,10 @@ export const domainPresets: DomainPreset[] = [
     risks: ["The domain may require fields not inferred from the prompt.", "Production use needs authentication and stronger data validation."],
     seedRecords: [
       { title: "Initial client request", requester: "Alex", priority: "Normal", targetDate: "2026-06-10", notes: "Review with client.", status: "Requested" },
-      { title: "Follow-up task", requester: "Sam", priority: "High", targetDate: "2026-06-12", notes: "Confirm scope.", status: "Approved" }
+      { title: "Follow-up task", requester: "Sam", priority: "High", targetDate: "2026-06-12", notes: "Confirm scope.", status: "Approved" },
     ],
-    fallback: true
-  }
+    fallback: true,
+  },
 ];
 
 export function domainSpecFromPreset(preset: DomainPreset, sourceGoal: string): DomainSpec {
@@ -329,14 +566,14 @@ export function domainSpecFromPreset(preset: DomainPreset, sourceGoal: string): 
     generatedArtifactTypes: [...(preset.generatedArtifactTypes ?? defaultGeneratedArtifactTypes)],
     assumptions: [...preset.assumptions],
     risks: [...preset.risks],
-    seedRecords: preset.seedRecords.map((record) => ({ ...record }))
+    seedRecords: preset.seedRecords.map((record) => ({ ...record })),
   };
 }
 
 function cloneEntity(entitySpec: EntitySpec): EntitySpec {
   return {
     ...entitySpec,
-    fields: entitySpec.fields.map((fieldSpec) => ({ ...fieldSpec, options: fieldSpec.options ? [...fieldSpec.options] : undefined }))
+    fields: entitySpec.fields.map((fieldSpec) => ({ ...fieldSpec, options: fieldSpec.options ? [...fieldSpec.options] : undefined })),
   };
 }
 
@@ -356,6 +593,6 @@ function screens(createName: string, listName: string, adminName: string): Scree
   return [
     { name: createName, purpose: "Capture a new record with the required fields.", actions: ["Create record"] },
     { name: listName, purpose: "Review submitted records in a scannable list.", actions: ["View records", "Filter records"] },
-    { name: adminName, purpose: "Update workflow status and prepare client review.", actions: ["Update status"] }
+    { name: adminName, purpose: "Update workflow status and prepare client review.", actions: ["Update status"] },
   ];
 }

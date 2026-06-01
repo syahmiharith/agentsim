@@ -1,5 +1,5 @@
 import type { DomainSpec, ScreenSpec } from "../domain/domain-spec.js";
-import type { AppScreenSpec, AppSpec, AppSummaryMetricSpec } from "./app-spec.js";
+import type { AppAcceptanceScenarioSpec, AppScreenSpec, AppSpec, AppSummaryMetricSpec } from "./app-spec.js";
 
 export function appSpecFromDomainSpec(domainSpec: DomainSpec): AppSpec {
   const statuses = domainSpec.workflowStatuses.length > 0 ? domainSpec.workflowStatuses : ["Requested"];
@@ -17,7 +17,7 @@ export function appSpecFromDomainSpec(domainSpec: DomainSpec): AppSpec {
     sourceGoal: domainSpec.sourceGoal,
     appName: domainSpec.appName,
     appSlug: domainSpec.appSlug,
-    appArchetype: "crud-workflow",
+    appArchetype: domainSpec.appArchetype ?? "crud-workflow",
     domain: domainSpec.domain,
     primaryEntity,
     targetUsers: [...domainSpec.targetUsers],
@@ -32,7 +32,9 @@ export function appSpecFromDomainSpec(domainSpec: DomainSpec): AppSpec {
     coreActions: [...domainSpec.coreActions],
     assumptions: [...domainSpec.assumptions],
     risks: [...domainSpec.risks],
-    deferredFeatures: [],
+    unresolvedQuestions: [...(domainSpec.unresolvedQuestions ?? [])],
+    deferredFeatures: [...(domainSpec.deferredFeatures ?? [])],
+    acceptanceScenarios: createAcceptanceScenarios(domainSpec.primaryEntity.name, domainSpec.primaryEntity.pluralName, statuses),
     seedRecords: domainSpec.seedRecords.map((record) => ({ ...record })),
   };
 }
@@ -83,6 +85,31 @@ function createSummaryMetrics(pluralName: string, statuses: string[]): AppSummar
     });
   }
   return metrics;
+}
+
+function createAcceptanceScenarios(entityName: string, pluralName: string, statuses: string[]): AppAcceptanceScenarioSpec[] {
+  const initialStatus = statuses[0] ?? "Requested";
+  const nextStatus = statuses.find((status) => status !== initialStatus) ?? initialStatus;
+  return [
+    {
+      id: "list-seeded-records",
+      name: `List ${pluralName.toLowerCase()}`,
+      steps: [`Open the ${pluralName.toLowerCase()} list`, "Load records from the local API"],
+      expectedOutcome: `The app shows seeded ${pluralName.toLowerCase()} from local JSON data.`,
+    },
+    {
+      id: "create-primary-record",
+      name: `Create ${entityName.toLowerCase()}`,
+      steps: [`Fill the ${entityName.toLowerCase()} form`, `Submit the new ${entityName.toLowerCase()}`],
+      expectedOutcome: `A new ${entityName.toLowerCase()} is persisted with ${initialStatus} status.`,
+    },
+    {
+      id: "update-primary-status",
+      name: `Update ${entityName.toLowerCase()} status`,
+      steps: [`Select an existing ${entityName.toLowerCase()}`, `Change status to ${nextStatus}`],
+      expectedOutcome: `The ${entityName.toLowerCase()} status is saved and appears in the list.`,
+    },
+  ];
 }
 
 function inferTerminalStatuses(statuses: string[]): string[] {
