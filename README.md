@@ -163,7 +163,7 @@ The current generated app contract is intentionally narrow: live mode may use a 
 
 ### Requirements
 
-- Node.js 20.11+
+- Node.js 24 LTS (CI), or a compatible version listed in `package.json`
 - pnpm
 
 Install dependencies:

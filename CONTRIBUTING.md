@@ -137,3 +137,19 @@ Project priorities, in order:
 2. software delivery and freelance use cases
 3. traceability, reviews, approvals, and handoff quality
 4. narrow vertical-slice quality over broad generic agent-platform features
+
+## CI toolchain and CodeQL setup
+
+TypeScript is pinned to 6.0.3 because `typescript-eslint` 8.63 requires TypeScript
+`>=4.8.4 <6.1.0`. Update the compiler and parser together and run lint before
+accepting a compiler upgrade. CI uses Node.js 24 to satisfy the ESLint 10 and
+Vite engine requirements.
+
+The checked-in `.github/workflows/codeql.yml` uses CodeQL advanced setup. GitHub
+cannot accept its results while CodeQL default setup is enabled (see
+[the configuration failure](https://github.com/syahmiharith/agentsim/actions/runs/38344566190)).
+A repository administrator must choose one setup: to retain this workflow,
+disable default setup in the repository's code scanning settings and use advanced
+setup. If default setup is preferred, remove the redundant advanced workflow in
+a separate reviewed change. Editing this documentation does not change those
+settings.

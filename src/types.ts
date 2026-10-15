@@ -20,16 +20,7 @@ export type ApprovalRiskLevel = "low" | "medium" | "high";
 export type ReviewVerdict = "pass" | "revise" | "fail";
 export type CommandPolicyLevel = "strict" | "dev" | "unsafe-local";
 export type ContextItemKind =
-  | "user_goal"
-  | "domain_spec"
-  | "repo_summary"
-  | "task"
-  | "artifact"
-  | "message"
-  | "decision"
-  | "approval"
-  | "test_result"
-  | "policy";
+  "user_goal" | "domain_spec" | "repo_summary" | "task" | "artifact" | "message" | "decision" | "approval" | "test_result" | "policy";
 export type ContextSensitivity = "public" | "internal" | "secret-redacted";
 
 export type TaskRunStatus =
